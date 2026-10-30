@@ -78,6 +78,7 @@ namespace OGMultiplayer.Plugin
         private int handledFrame = -1;
         private readonly List<Row> rows = new List<Row>();
         private Text subtitle;
+        private Text statusLine;
         private Text footer;
         private readonly List<Text> playerLines = new List<Text>();
         private readonly List<Image> playerPortraits = new List<Image>();
@@ -299,6 +300,7 @@ namespace OGMultiplayer.Plugin
             playerLines.Clear();
             playerPortraits.Clear();
             subtitle = null;
+            statusLine = null;
             footer = null;
             showcasePortrait = null;
             bubble = null;
@@ -431,10 +433,11 @@ namespace OGMultiplayer.Plugin
         {
             bool inMatch = Session.RoomState == Protocol.StateMatch;
             Header(Session.IsOffline ? "GEGEN BOTS" : "ONLINE", string.Empty);
-            float y = 190f;
+            statusLine = NewText(pageRoot, "Status", string.Empty, 16, new Color(1f, 0.93f, 0.55f, 1f), new Vector2(0f, subtitle.rectTransform.anchoredPosition.y - 30f), new Vector2(1160f, 30f));
+            float y = 162f;
             for (int i = 0; i < Protocol.MaxPlayers; i++)
             {
-                float rowY = y - i * 42f;
+                float rowY = y - i * 38f;
                 Image portrait = NewImage(pageRoot, "PlayerPortrait" + i, Color.white, new Vector2(-330f, rowY), new Vector2(34f, 40f));
                 portrait.preserveAspect = true;
                 portrait.enabled = false;
@@ -443,14 +446,14 @@ namespace OGMultiplayer.Plugin
                 line.alignment = TextAnchor.MiddleLeft;
                 playerLines.Add(line);
             }
-            float c = 0f;
-            const float step = 50f;
+            float c = -14f;
+            const float step = 48f;
             int n = 0;
             if (!inMatch && Session.IsHost)
             {
                 AddRow("Discipline", () => DisciplineName(Disciplines[disciplineIndex]), new Vector2(0f, c - step * n++), StartMatch,
                     horizontal: d => disciplineIndex = (disciplineIndex + Disciplines.Length + d) % Disciplines.Length);
-                AddRow("Start", () => "RUNDE STARTEN", new Vector2(0f, c - step * n++), StartMatch);
+                AddRow("Start", () => Session.Lobby.Count < Protocol.MinPlayers ? "RUNDE STARTEN (AB 2 SPIELERN)" : "RUNDE STARTEN", new Vector2(0f, c - step * n++), StartMatch);
                 AddRow("BotCount", () => "BOTS: " + Session.BotCount, new Vector2(0f, c - step * n++), Session.AddBot,
                     horizontal: d =>
                     {
@@ -500,6 +503,12 @@ namespace OGMultiplayer.Plugin
         {
             if (Session.Connecting)
             {
+                return;
+            }
+            if (Session.Connected && !Session.IsOffline)
+            {
+                // already in a room: never drop the connection by pressing VERBINDEN again
+                Show(Page.Lobby, 0);
                 return;
             }
             SaveSettings();
@@ -557,20 +566,29 @@ namespace OGMultiplayer.Plugin
             {
                 if (subtitle != null)
                 {
-                    subtitle.text = Session.IsOffline
+                    subtitle.text = (Session.IsOffline
                         ? $"{Session.Lobby.Count}/{Protocol.MaxPlayers} SPIELER  -  BOTS: {Bots.LevelName(Session.BotLevel)}"
-                        : $"RAUM {Session.RoomName.ToUpperInvariant()}  -  {Session.Lobby.Count}/{Protocol.MaxPlayers} SPIELER";
+                        : $"RAUM {Session.RoomName.ToUpperInvariant()}  -  {Session.Lobby.Count}/{Protocol.MaxPlayers} SPIELER");
+                }
+                if (statusLine != null)
+                {
+                    statusLine.text = Session.LobbyStatus();
                 }
                 for (int i = 0; i < playerLines.Count; i++)
                 {
                     LobbyPlayer p = i < Session.Lobby.Count ? Session.Lobby[i] : null;
-                    playerLines[i].text = p == null ? string.Empty : PlayerLine(p);
+                    bool firstFree = i == Session.Lobby.Count;
+                    // free seats stay visible (dimmed); the first one says what we wait for
+                    playerLines[i].text = p != null ? PlayerLine(p)
+                        : firstFree && !Session.IsOffline && Session.RoomState != Protocol.StateMatch ? "FREI - WARTE AUF SPIELER" + new string('.', 1 + (int)(Time.unscaledTime * 2f) % 3)
+                        : "FREI";
+                    playerLines[i].color = p != null ? Color.white : new Color(1f, 1f, 1f, 0.45f);
                     SetPortrait(playerPortraits[i], p?.Character);
                 }
                 if (footer != null)
                 {
                     footer.text = Session.RoomState == Protocol.StateMatch ? "EINE RUNDE LAEUFT GERADE."
-                        : Session.IsHost ? (Session.Lobby.Count < Protocol.MinPlayers ? "MIND. 2 SPIELER: MITSPIELER ABWARTEN ODER BOTS HINZUFUEGEN." : "LINKS/RECHTS: WERT AENDERN")
+                        : Session.IsHost ? (Session.Lobby.Count < Protocol.MinPlayers ? "TIPP: MIT BOTS KANNST DU SOFORT LOSLEGEN." : "LINKS/RECHTS: WERT AENDERN")
                         : $"{Session.HostInitials()} WAEHLT DIE DISZIPLIN.";
                 }
             }
@@ -924,6 +942,12 @@ namespace OGMultiplayer.Plugin
                 return;
             }
             AttractDemoController.NotifyHotSeatActivity();
+            if (page == Page.Connect && Session.Connected && !Session.IsOffline)
+            {
+                // connected: continue in the lobby like the game moves on after a confirmation
+                Show(Page.Lobby, 0);
+                return;
+            }
             if (page == Page.Lobby && !Session.Connected && !Session.Connecting)
             {
                 // connection failed or was closed: back to the form, the reason shows in the footer

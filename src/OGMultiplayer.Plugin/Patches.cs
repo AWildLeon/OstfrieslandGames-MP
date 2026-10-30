@@ -166,6 +166,19 @@ namespace OGMultiplayer.Plugin
         }
     }
 
+    /// <summary>
+    /// The start screen camera scrolls back to the logo on Back; it skips that during hot seat,
+    /// and does the same while an online page is open (so leaving a page stays in the menu).
+    /// </summary>
+    [HarmonyPatch(typeof(StartScreenCameraScroller), "Update")]
+    internal static class CameraScrollerPatch
+    {
+        private static bool Prefix()
+        {
+            return !StartScreenPatches.Covered && Time.unscaledTime >= OnlineMenu.MenuInputBlockedUntil;
+        }
+    }
+
     /// <summary>Lets the game's own hot seat registration pick the online player (see OnlineSetup).</summary>
     [HarmonyPatch]
     internal static class OnlineSetupPatches
@@ -227,6 +240,9 @@ namespace OGMultiplayer.Plugin
             return false;
         }
 
+        /// <summary>True while an online page covers the start screen (or is about to).</summary>
+        internal static bool Covered => OnlineMenu.Visible || OnlineSetup.Finished != OnlineSetup.Purpose.None;
+
         // While an online page is open the main menu is hidden and ignores input, like during hot seat.
         [HarmonyPrefix]
         [HarmonyPatch("Update")]
@@ -234,7 +250,7 @@ namespace OGMultiplayer.Plugin
         {
             // also while returning from the game's registration, so the main menu (and its
             // one-time notices) does not flash up before the online page takes over
-            bool covered = OnlineMenu.Visible || OnlineSetup.Finished != OnlineSetup.Purpose.None;
+            bool covered = Covered;
             if (!covered && Time.unscaledTime >= OnlineMenu.MenuInputBlockedUntil)
             {
                 return true;

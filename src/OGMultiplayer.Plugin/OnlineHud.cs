@@ -122,6 +122,10 @@ namespace OGMultiplayer.Plugin
                 center = "FERTIG! WARTE AUF DIE ANDEREN ...";
             }
             SetBox(bannerBackdrop, banner, center);
+            // over the menu the title area is taken, so messages go to the bottom there
+            float toastY = menuOpen ? -338f : 236f;
+            toastBackdrop.rectTransform.anchoredPosition = new Vector2(0f, toastY);
+            toast.rectTransform.anchoredPosition = new Vector2(0f, toastY);
             SetBox(toastBackdrop, toast, string.IsNullOrEmpty(Session.Message) ? null : Session.Message.ToUpperInvariant());
         }
 
@@ -147,6 +151,10 @@ namespace OGMultiplayer.Plugin
                 sb.Append("  ");
                 sb.Append(StatusText(p));
                 lines.Add(sb.ToString());
+            }
+            if (Session.RoomState != Protocol.StateMatch)
+            {
+                lines.Add(Session.LobbyStatus(brief: true));
             }
             while (panelLines.Count < lines.Count)
             {

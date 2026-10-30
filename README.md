@@ -73,6 +73,9 @@ cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
    (Enter übernimmt, Esc bricht ab), Links/Rechts ändert Werte; Maus geht auch.
    Alle Mitspieler nutzen denselben Server und denselben Raumnamen.
    Rechts steht deine gewählte Figur mit einem ihrer Sprüche aus der Figurenauswahl des Spiels.
+   Nach dem Verbinden geht es automatisch in die Lobby. Dort zeigt eine Statuszeile, worauf
+   gewartet wird („Warte auf andere Spieler …“, „Warte auf den Host …“), freie Plätze sind
+   abgeblendet sichtbar.
 4. Sobald mindestens zwei Spieler (oder Bots) im Raum sind, wählt der Host die Disziplin
    und startet die Runde.
 5. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.

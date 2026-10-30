@@ -297,6 +297,29 @@ namespace OGMultiplayer.Plugin
             Send(Protocol.Start, Protocol.Int((int)discipline));
         }
 
+        /// <summary>One line describing what the lobby is waiting for (used by menu and HUD).</summary>
+        public string LobbyStatus(bool brief = false)
+        {
+            string dots = new string('.', 1 + (int)(Time.unscaledTime * 2f) % 3).PadRight(3);
+            if (!Connected)
+            {
+                return "VERBINDE " + dots;
+            }
+            if (RoomState == Protocol.StateMatch)
+            {
+                return "RUNDE LAEUFT " + dots;
+            }
+            if (Lobby.Count < Protocol.MinPlayers)
+            {
+                return (IsOffline ? "FUEGE BOTS HINZU " : brief ? "WARTE AUF SPIELER " : "WARTE AUF ANDERE SPIELER ") + dots;
+            }
+            if (!IsHost)
+            {
+                return (brief ? $"WARTE AUF {HostInitials()} " : $"WARTE AUF DEN HOST ({HostInitials()}) ") + dots;
+            }
+            return brief ? "BEREIT ZUM START" : "BEREIT - DU STARTEST DIE RUNDE";
+        }
+
         public string HostInitials()
         {
             return Lobby.FirstOrDefault(p => p.Id == HostId)?.Initials ?? "?";
