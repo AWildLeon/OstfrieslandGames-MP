@@ -10,6 +10,9 @@ Ergebnisse ein und schickt sie an alle zurück. Das Ergebnis erscheint im
 Original-Ergebnisbildschirm des Spiels.
 
 - 2–4 Spieler pro Raum, beliebig viele Räume pro Server
+- **Bots**: der Host füllt freie Plätze mit Bots (leicht/mittel/schwer); **Gegen Bots** geht
+  auch ganz ohne Server
+- Menüs im Stil des Spiels: Hauptmenü → *Mehrspieler* → *An einem Gerät* / *Online* / *Gegen Bots*
 - alle fünf Disziplinen: Padstockspringen, Schlickschlitten, Bosseln, Teezeremonie, Krabbenpulen
 - der erste Spieler im Raum ist Host und wählt Disziplin bzw. Revanche
 - wer abbricht oder die Verbindung verliert, bekommt 0 Punkte – die Runde läuft für die anderen weiter
@@ -60,19 +63,34 @@ cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
 
 ## Spielen
 
-1. Spiel mit BepInEx starten, im Hauptmenü **F8** drücken.
-2. Server, Port, ggf. Server-Passwort, Raumname, deine drei Initialen und deine Figur
-   eintragen → **Verbinden**.
+1. Spiel mit BepInEx starten, im Hauptmenü **Mehrspieler → Online** wählen (Abkürzung: **F8**).
+   *An einem Gerät* ist der normale Hot-Seat-Modus des Spiels.
+2. Server, ggf. Passwort, Raum, Initialen und Figur einstellen → **Verbinden**.
+   Bedienung wie in den Spielmenüs: Hoch/Runter wählen, Bestätigen öffnet ein Feld zum Tippen
+   (Enter übernimmt, Esc bricht ab), Links/Rechts ändert Figur & Co. Initialen gehen auch
+   arcade-mäßig mit Hoch/Runter pro Buchstabe. Maus funktioniert ebenfalls.
    Alle Mitspieler nutzen denselben Server und denselben Raumnamen.
-3. Sobald mindestens zwei Spieler im Raum sind, wählt der Host im F8-Fenster eine Disziplin.
+3. Sobald mindestens zwei Spieler (oder Bots) im Raum sind, wählt der Host die Disziplin
+   und startet die Runde.
 4. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.
 5. Nach deinem Lauf wartest du auf die anderen, danach kommt der gemeinsame Ergebnisbildschirm.
    Dort startet der Host per Revanche-Taste (Leertaste) die nächste Runde oder wählt eine andere Disziplin.
 
 Unten rechts siehst du während einer Runde alle Spieler mit Status und Punkten.
 
+### Bots
+
+- **Online:** Der Host stellt in der Lobby *Bots* (Anzahl) und *Bot-Stärke* ein. Bots belegen
+  Plätze im Raum, sind sofort bereit, zeigen Live-Punkte und sind spätestens kurz nach dem
+  letzten Menschen fertig. Ihre Punkte orientieren sich am Median der echten Ergebnisse auf
+  dem Server (anfangs an den Startwerten der Spiel-Bestenliste, 600–1500): *leicht* ≈ 55 %,
+  *mittel* ≈ 88 %, *schwer* ≈ 120 %, jeweils mit Streuung.
+- **Gegen Bots (offline):** Mehrspieler → *Gegen Bots*. Kein Server, kein Netzwerk; ein
+  kleiner lokaler Ersatz-Server im Mod übernimmt. Bots richten sich nach deiner eigenen
+  lokalen Bestenliste der Disziplin.
+
 Einstellungen landen in `BepInEx/config/de.onlh.ostfriesland.multiplayer.cfg`
-(Server, Passwort, Raum, Initialen, Figur, Taste für das Fenster, Ecke für die Spielerliste,
+(Server, Passwort, Raum, Initialen, Figur, F8-Abkürzung, Ecke für die Spielerliste,
 `Privacy.BlockScoreApiWhileOnline`).
 
 ### Online-Bestenliste des Spiels
@@ -118,7 +136,7 @@ Der Server liest Befehle von seiner Standardeingabe – einfach ins Terminal tip
 | `help` | alle Befehle |
 | `status` | Uptime, Verbindungen, Räume, Passwort, Bans |
 | `players` | alle Verbindungen mit ID, Raum, Status, IP |
-| `rooms` | Räume mit Host und laufender Runde |
+| `rooms` | Räume mit Host, Bots und laufender Runde |
 | `say <text>` / `sayroom <raum> <text>` | Nachricht, erscheint im Spiel |
 | `kick <id> [grund]` | Spieler trennen |
 | `ban <id\|ip> [grund]` / `unban <ip>` / `bans` | IP dauerhaft sperren / entsperren / auflisten |
@@ -132,12 +150,12 @@ atomar geschrieben) und überleben Neustarts. Ist die Datei kaputt, startet der 
 statt still alle Bans zu vergessen. Achtung: Ein per `password` gesetztes Passwort steht
 im Klartext darin.
 
-Getrennte/gekickte Spieler sehen den Grund im F8-Fenster. Strg+C und `SIGTERM`
+Getrennte/gekickte Spieler sehen den Grund als Meldung im Spiel. Strg+C und `SIGTERM`
 (z. B. `systemctl stop`) beenden ebenfalls sauber und verabschieden alle Spieler.
 
 ### Passwort
 
-Ohne Passwort ist der Server offen. Mit Passwort trägt jeder Spieler es im F8-Fenster ein.
+Ohne Passwort ist der Server offen. Mit Passwort trägt jeder Spieler es auf der Online-Seite ein.
 Das Passwort wird **nie im Klartext übertragen**: Der Server schickt pro Verbindung eine
 zufällige Nonce, der Client antwortet mit `HMAC-SHA256(Passwort, Nonce)`. Nach 5 falschen
 Versuchen innerhalb von 5 Minuten wird die IP vorübergehend gesperrt.

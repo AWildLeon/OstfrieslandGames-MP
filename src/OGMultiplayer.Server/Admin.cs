@@ -171,7 +171,7 @@ public sealed partial class GameServer
                 ? "Lobby"
                 : $"Runde {r.Match.Id}, Disziplin {r.Match.Discipline}, " + string.Join(", ", r.Match.Participants.Select(p => $"{p.Initials}:{p.Status}:{p.Score}"));
             lines.Add($"{r.Name}  [{r.Members.Count}/{Protocol.MaxPlayers}]  Host {r.Host?.Initials ?? "-"}  {match}");
-            lines.Add("    " + string.Join(", ", r.Members.Select(m => $"#{m.Id} {m.Initials}")));
+            lines.Add("    " + string.Join(", ", r.Members.Select(m => m.IsBot ? $"#{m.Id} {m.Initials} (Bot, {Bots.LevelName(m.BotLevel)})" : $"#{m.Id} {m.Initials}")));
         }
         return string.Join("\n", lines);
     }

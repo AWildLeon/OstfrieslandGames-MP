@@ -165,16 +165,39 @@ namespace OGMultiplayer.Plugin
         }
     }
 
-    /// <summary>Keeps keyboard input out of the game menus while typing into the online window.</summary>
-    [HarmonyPatch]
-    internal static class MenuInputPatches
+    /// <summary>Hooks the online pages into the start screen menu.</summary>
+    [HarmonyPatch(typeof(StartScreenMenuController))]
+    internal static class StartScreenPatches
     {
+        // MEHRSPIELER opens the choice page (one device / online / bots) instead of the local setup.
         [HarmonyPrefix]
-        [HarmonyPatch(typeof(StartScreenMenuController), "Update")]
-        private static bool StartScreenUpdatePrefix() => !OnlineUi.CapturesKeyboard;
+        [HarmonyPatch(nameof(StartScreenMenuController.OpenMultiplayer))]
+        private static bool OpenMultiplayerPrefix()
+        {
+            if (OnlineSession.Authorized || OnlineMenu.Instance == null || HotSeatFlowController.IsActive)
+            {
+                return true;
+            }
+            OnlineMenu.Instance.ShowChoice();
+            return false;
+        }
 
+        // While an online page is open the main menu is hidden and ignores input, like during hot seat.
         [HarmonyPrefix]
-        [HarmonyPatch(typeof(HotSeatScreen), "Update")]
-        private static bool HotSeatScreenUpdatePrefix() => !OnlineUi.CapturesKeyboard;
+        [HarmonyPatch("Update")]
+        private static bool UpdatePrefix(StartScreenMenuController __instance)
+        {
+            if (!OnlineMenu.Visible && Time.unscaledTime >= OnlineMenu.MenuInputBlockedUntil)
+            {
+                return true;
+            }
+            if (OnlineMenu.Visible && __instance.canvasGroup != null)
+            {
+                __instance.canvasGroup.alpha = 0f;
+                __instance.canvasGroup.interactable = false;
+                __instance.canvasGroup.blocksRaycasts = false;
+            }
+            return false;
+        }
     }
 }

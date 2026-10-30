@@ -37,7 +37,7 @@ namespace OGMultiplayer.Plugin
             RoomName = Config.Bind("Server", "Room", "ostfriesland", "Raumname; alle Mitspieler muessen denselben Raum nutzen.");
             Initials = Config.Bind("Player", "Initials", "", "Deine drei Initialen (A-Z).");
             Character = Config.Bind("Player", "Character", "tim", "Figur-ID.");
-            ToggleKey = Config.Bind("UI", "ToggleKey", KeyCode.F8, "Taste fuer das Online-Fenster.");
+            ToggleKey = Config.Bind("UI", "ToggleKey", KeyCode.F8, "Abkuerzung im Hauptmenue: oeffnet direkt die Online-Seite.");
             BlockScoreApi = Config.Bind("Privacy", "BlockScoreApiWhileOnline", true, "Keine Verbindungen zur Online-Bestenliste des Spiels, solange der Online-Modus verbunden ist. Online-Runden landen nie in der weltweiten Bestenliste.");
             HudPosition = Config.Bind("UI", "HudPosition", HudCorner.BottomRight, "Ecke fuer die Spielerliste waehrend einer Online-Runde.");
 
@@ -53,8 +53,9 @@ namespace OGMultiplayer.Plugin
             DontDestroyOnLoad(host);
             host.hideFlags = HideFlags.HideAndDontSave;
             host.AddComponent<OnlineSession>();
-            host.AddComponent<OnlineUi>();
-            Log.LogInfo($"{Name} {Version} geladen (Protokoll v{OGMultiplayer.Protocol.Version}). {ToggleKey.Value} oeffnet das Online-Fenster.");
+            host.AddComponent<OnlineMenu>();
+            host.AddComponent<OnlineHud>();
+            Log.LogInfo($"{Name} {Version} geladen (Protokoll v{OGMultiplayer.Protocol.Version}). Hauptmenue > MEHRSPIELER oder {ToggleKey.Value} oeffnet den Online-Modus.");
         }
 
         private void OnDestroy()

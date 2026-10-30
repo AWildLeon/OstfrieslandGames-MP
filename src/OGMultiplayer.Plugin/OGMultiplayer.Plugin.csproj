@@ -22,7 +22,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="../Shared/Protocol.cs" Link="Shared/Protocol.cs" />
+    <Compile Include="../Shared/*.cs" LinkBase="Shared" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,10 +34,10 @@
     <Reference Include="Assembly-CSharp" HintPath="$(GameManagedDir)/Assembly-CSharp.dll" Private="false" />
     <Reference Include="UnityEngine" HintPath="$(GameManagedDir)/UnityEngine.dll" Private="false" />
     <Reference Include="UnityEngine.CoreModule" HintPath="$(GameManagedDir)/UnityEngine.CoreModule.dll" Private="false" />
-    <Reference Include="UnityEngine.IMGUIModule" HintPath="$(GameManagedDir)/UnityEngine.IMGUIModule.dll" Private="false" />
     <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(GameManagedDir)/UnityEngine.InputLegacyModule.dll" Private="false" />
     <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(GameManagedDir)/UnityEngine.TextRenderingModule.dll" Private="false" />
     <Reference Include="UnityEngine.UI" HintPath="$(GameManagedDir)/UnityEngine.UI.dll" Private="false" />
+    <Reference Include="UnityEngine.UIModule" HintPath="$(GameManagedDir)/UnityEngine.UIModule.dll" Private="false" />
   </ItemGroup>
 
   <Target Name="CheckGameDir" BeforeTargets="ResolveAssemblyReferences">

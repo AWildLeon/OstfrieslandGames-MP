@@ -12,7 +12,20 @@ namespace OGMultiplayer.Plugin
     /// received lines are queued and drained on the Unity main thread.
     /// One instance per connection attempt.
     /// </summary>
-    internal sealed class NetClient : IDisposable
+    /// <summary>Line based connection to a server (real TCP or the local bot server).</summary>
+    internal interface ITransport : IDisposable
+    {
+        string LastError { get; }
+
+        void Send(string line);
+
+        bool TryReceive(out string line);
+
+        /// <summary>Called every frame on the main thread.</summary>
+        void Tick();
+    }
+
+    internal sealed class NetClient : ITransport
     {
         public const string DisconnectedMarker = "\u0000DISCONNECTED";
 
@@ -88,6 +101,10 @@ namespace OGMultiplayer.Plugin
                 running = false;
                 CloseSocket();
             }
+        }
+
+        public void Tick()
+        {
         }
 
         public bool TryReceive(out string line)

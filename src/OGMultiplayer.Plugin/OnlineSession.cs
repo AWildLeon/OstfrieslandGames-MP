@@ -13,6 +13,7 @@ namespace OGMultiplayer.Plugin
         public string Character;
         public string Status;
         public int Score;
+        public bool IsBot;
     }
 
     /// <summary>
@@ -27,7 +28,7 @@ namespace OGMultiplayer.Plugin
         /// <summary>Set while the mod itself calls patched game methods.</summary>
         public static bool Authorized { get; private set; }
 
-        private NetClient net;
+        private ITransport net;
         private float lastPing;
         private float lastLive;
         private int lastLiveScore = -1;
@@ -64,7 +65,14 @@ namespace OGMultiplayer.Plugin
         }
 
         /// <summary>True while connected/connecting or an online match is open.</summary>
-        public static bool BlocksScoreApi => Instance != null && Plugin.BlockScoreApi.Value && (Instance.net != null || OnlineControllerActive);
+        public static bool BlocksScoreApi => Instance != null && Plugin.BlockScoreApi.Value && (Instance.net is NetClient || (OnlineControllerActive && !Instance.IsOffline));
+
+        /// <summary>Playing against bots without a server.</summary>
+        public bool IsOffline => net is LocalBotServer;
+
+        public int BotLevel { get; private set; } = Bots.DefaultLevel;
+
+        public int BotCount => Lobby.Count(p => p.IsBot);
 
         public static bool OnlineControllerActive => Instance != null && Instance.controller != null && HotSeatFlowController.Instance == Instance.controller;
 
@@ -145,10 +153,49 @@ namespace OGMultiplayer.Plugin
             Connecting = true;
             pendingHello = new[] { ini, charId, roomId };
             pendingPassword = password ?? string.Empty;
-            net = new NetClient();
-            net.Connect(host.Trim(), port);
+            var client = new NetClient();
+            net = client;
+            client.Connect(host.Trim(), port);
             lastPing = Time.unscaledTime;
             Plugin.Log.LogInfo($"Connecting to {host}:{port}, room '{roomId}' as {ini}");
+        }
+
+        /// <summary>Starts the offline mode against bots (local stand-in server).</summary>
+        public void StartOffline(string initials, string character)
+        {
+            Disconnect();
+            string ini = Protocol.NormalizeInitials(initials);
+            if (ini == null || InitialsEntryOverlay.IsBlocked(ini))
+            {
+                ini = "ICH";
+            }
+            string charId = Protocol.NormalizeId(character) ?? SelectedCharacter.DefaultId;
+            LastError = null;
+            Connecting = true;
+            pendingHello = new[] { ini, charId, "offline" };
+            pendingPassword = string.Empty;
+            net = new LocalBotServer(GameBridge.LocalScores);
+            Plugin.Log.LogInfo("Offline-Modus gegen Bots gestartet");
+        }
+
+        public void AddBot() => SendBot(Protocol.BotAdd);
+
+        public void RemoveBot() => SendBot(Protocol.BotRemove);
+
+        public void SetBotLevel(int level) => SendBot(Protocol.BotLevel, Protocol.Int(Bots.ClampLevel(level)));
+
+        private void SendBot(params string[] args)
+        {
+            if (!Connected)
+            {
+                return;
+            }
+            if (!IsHost)
+            {
+                Toast($"Nur der Host ({HostInitials()}) verwaltet Bots.");
+                return;
+            }
+            Send(new[] { Protocol.Bot }.Concat(args).ToArray());
         }
 
         private string[] pendingHello;
@@ -260,6 +307,7 @@ namespace OGMultiplayer.Plugin
         private void Update()
         {
             GameBridge.CacheMenuAssets();
+            net?.Tick();
             if (net != null)
             {
                 while (net != null && net.TryReceive(out string line))
@@ -393,8 +441,12 @@ namespace OGMultiplayer.Plugin
             Protocol.TryInt(f[2], out int host);
             HostId = host;
             RoomState = f[3];
+            if (f.Length > 4 && Protocol.TryInt(f[4], out int level))
+            {
+                BotLevel = level;
+            }
             Lobby.Clear();
-            for (int i = 4; i < f.Length; i++)
+            for (int i = 5; i < f.Length; i++)
             {
                 string[] p = Protocol.SplitPart(f[i]);
                 if (p.Length < 5 || !Protocol.TryInt(p[0], out int pid))
@@ -402,7 +454,7 @@ namespace OGMultiplayer.Plugin
                     continue;
                 }
                 Protocol.TryInt(p[4], out int score);
-                Lobby.Add(new LobbyPlayer { Id = pid, Initials = p[1], Character = p[2], Status = p[3], Score = score });
+                Lobby.Add(new LobbyPlayer { Id = pid, Initials = p[1], Character = p[2], Status = p[3], Score = score, IsBot = p.Length > 5 && p[5] == "1" });
             }
         }
 

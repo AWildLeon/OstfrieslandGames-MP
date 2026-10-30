@@ -230,6 +230,19 @@ namespace OGMultiplayer.Plugin
             ScoreSaveMethod.Invoke(store, null);
         }
 
+        /// <summary>Real (non-seed) local scores of a discipline, newest first.</summary>
+        public static IList<int> LocalScores(int discipline)
+        {
+            var result = new List<int>();
+            ScoreDocument doc = ScoreDocField?.GetValue(ScoreStore.Instance) as ScoreDocument;
+            DisciplineRecord record = doc?.disciplines?.FirstOrDefault(d => d != null && d.discipline == discipline);
+            if (record?.history != null)
+            {
+                result.AddRange(record.history.Where(e => e != null && !e.isSeed && e.score > 0).Take(30).Select(e => e.score));
+            }
+            return result;
+        }
+
         /// <summary>Best effort live score of the running discipline, -1 when unknown.</summary>
         public static int LiveScore(DisciplineId discipline)
         {

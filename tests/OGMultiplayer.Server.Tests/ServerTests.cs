@@ -400,3 +400,86 @@ public class StateTests : IDisposable
         await Assert.ThrowsAsync<InvalidDataException>(() => fx.Run);
     }
 }
+
+public class BotTests
+{
+    [Fact]
+    public async Task HostCanPlayAgainstBots()
+    {
+        await using var fx = new ServerFixture();
+        using var host = fx.Connect();
+        host.Hello("HST");
+        host.Send(Protocol.Bot, Protocol.BotLevel, "3");
+        host.Send(Protocol.Bot, Protocol.BotAdd);
+        host.Send(Protocol.Bot, Protocol.BotAdd);
+        string[] lobby;
+        do
+        {
+            lobby = host.Next(Protocol.Lobby);
+        }
+        while (lobby.Length < 5 + 3);
+        Assert.Equal("3", lobby[4]);
+        Assert.Equal(2, lobby.Skip(5).Count(p => p.EndsWith("|1")));
+
+        host.Send(Protocol.Start, "0");
+        string[] begin = host.Next(Protocol.Begin);
+        Assert.Equal(3, begin.Length - 3);
+        string matchId = begin[1];
+        host.Send(Protocol.Ready, matchId);
+        host.Next(Protocol.Go);
+        host.Send(Protocol.Score, matchId, "900");
+        string[] result = host.Next(Protocol.Result);
+        Assert.Equal(3, result.Length - 2);
+        foreach (string part in result.Skip(2))
+        {
+            Assert.True(int.Parse(part.Split('|')[1]) > 0, part);
+        }
+    }
+
+    [Fact]
+    public async Task OnlyHostManagesBotsAndRoomLimitCounts()
+    {
+        await using var fx = new ServerFixture();
+        using var host = fx.Connect();
+        using var guest = fx.Connect();
+        host.Hello("HST");
+        guest.Hello("GST");
+        guest.Send(Protocol.Bot, Protocol.BotAdd);
+        Assert.Equal(Protocol.Error, guest.Next(Protocol.Error)[0]);
+        host.Send(Protocol.Bot, Protocol.BotAdd);
+        host.Send(Protocol.Bot, Protocol.BotAdd);
+        host.Send(Protocol.Bot, Protocol.BotAdd);
+        Assert.Contains("voll", host.Next(Protocol.Error)[1]);
+        using var late = fx.Connect();
+        Assert.Equal(Protocol.Error, late.Hello("LAT")[0]);
+        host.Send(Protocol.Bot, Protocol.BotRemove);
+        Thread.Sleep(200);
+        using var late2 = fx.Connect();
+        Assert.Equal(Protocol.Welcome, late2.Hello("LAT")[0]);
+    }
+
+    [Fact]
+    public async Task RoomWithOnlyBotsCloses()
+    {
+        await using var fx = new ServerFixture();
+        using (var host = fx.Connect())
+        {
+            host.Hello("HST");
+            host.Send(Protocol.Bot, Protocol.BotAdd);
+            host.Next(Protocol.Lobby);
+        }
+        Thread.Sleep(500);
+        Assert.Equal("Keine Raeume.", fx.Server.ExecuteAdmin("rooms"));
+    }
+
+    [Fact]
+    public void BotScoresFollowLevelAndReference()
+    {
+        var rng = new Random(1);
+        double Avg(int level) => Enumerable.Range(0, 200).Average(_ => Bots.TargetScore(level, 1000, rng));
+        Assert.True(Avg(1) < Avg(2));
+        Assert.True(Avg(2) < Avg(3));
+        Assert.Equal(Bots.DefaultReference, Bots.Reference(new List<int>()));
+        Assert.Equal(500, Bots.Reference(new List<int> { 100, 500, 900 }));
+    }
+}

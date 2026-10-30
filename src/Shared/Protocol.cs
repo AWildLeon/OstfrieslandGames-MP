@@ -24,13 +24,14 @@ namespace OGMultiplayer
     ///   SCORE    matchId score              (turn finished)
     ///   LEAVE    matchId                    (aborted the running match)
     ///   CHAR     characterId                (change character while in lobby)
+    ///   BOT      ADD | REMOVE | LEVEL n     (host only, while in lobby)
     ///   PING
     ///
     /// Server -> Client
     ///   CHALLENGE version nonce passwordRequired(0|1)
     ///   WELCOME  playerId
     ///   ERROR    message
-    ///   LOBBY    room hostId state player*  (player = id|INI|char|status|score)
+    ///   LOBBY    room hostId state botLevel player*  (player = id|INI|char|status|score|bot)
     ///   BEGIN    matchId discipline player* (player = id|INI|char)
     ///   GO       matchId
     ///   RESULT   matchId score*             (score = id|points)
@@ -55,6 +56,10 @@ namespace OGMultiplayer
         public const string Leave = "LEAVE";
         public const string Char = "CHAR";
         public const string Ping = "PING";
+        public const string Bot = "BOT";
+        public const string BotAdd = "ADD";
+        public const string BotRemove = "REMOVE";
+        public const string BotLevel = "LEVEL";
 
         public const string Challenge = "CHALLENGE";
         public const string Welcome = "WELCOME";

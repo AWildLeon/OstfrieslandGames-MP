@@ -245,6 +245,13 @@ public sealed partial class GameServer
 
     private void Tick(DateTime now)
     {
+        foreach (Room room in rooms.Values.ToList())
+        {
+            if (room.Match != null)
+            {
+                TickBots(room, room.Match, now);
+            }
+        }
         foreach (Client c in clients.ToList())
         {
             if (now - c.LastSeen > options.IdleTimeout)
@@ -333,6 +340,9 @@ public sealed partial class GameServer
                 break;
             case Protocol.Leave:
                 HandleLeave(client, room, f);
+                break;
+            case Protocol.Bot:
+                HandleBot(client, room, f);
                 break;
         }
     }
@@ -435,9 +445,17 @@ public sealed partial class GameServer
             return;
         }
         var match = new Match(++nextMatchId, discipline, DateTime.UtcNow);
+        int reference = Bots.Reference(humanScores.TryGetValue(discipline, out List<int>? seen) ? seen : new List<int>());
         foreach (Client member in room.Members)
         {
-            match.Participants.Add(new Participant(member));
+            var participant = new Participant(member);
+            if (member.IsBot)
+            {
+                participant.Status = Protocol.StatusReady;
+                participant.BotTarget = Bots.TargetScore(member.BotLevel, reference, random);
+                participant.BotDuration = Bots.Duration(random);
+            }
+            match.Participants.Add(participant);
         }
         room.Match = match;
         var fields = new List<string> { Protocol.Begin, Protocol.Int(match.Id), Protocol.Int(discipline) };
@@ -494,6 +512,7 @@ public sealed partial class GameServer
         foreach (Participant p in m.Participants.Where(x => x.Status == Protocol.StatusReady))
         {
             p.Status = Protocol.StatusPlaying;
+            p.BotStartedAt = DateTime.UtcNow;
             p.Client.Send(go);
         }
         Log($"[{room.Name}] match {m.Id}: GO");
@@ -521,6 +540,7 @@ public sealed partial class GameServer
         }
         p.Score = Math.Max(0, score);
         p.Status = Protocol.StatusDone;
+        RememberHumanScore(m.Discipline, p.Score);
         Log($"[{room.Name}] match {m.Id}: {p.Initials} finished with {p.Score}");
         CheckFinished(room, m);
     }
@@ -572,6 +592,108 @@ public sealed partial class GameServer
         BroadcastLobby(room);
     }
 
+    // ------------------------------------------------------------------ bots
+
+    private readonly Random random = new();
+
+    /// <summary>Recent real scores per discipline; bots aim at their median.</summary>
+    private readonly Dictionary<int, List<int>> humanScores = new();
+
+    private void RememberHumanScore(int discipline, int score)
+    {
+        if (score <= 0)
+        {
+            return;
+        }
+        if (!humanScores.TryGetValue(discipline, out List<int>? list))
+        {
+            list = new List<int>();
+            humanScores[discipline] = list;
+        }
+        list.Add(score);
+        if (list.Count > 50)
+        {
+            list.RemoveAt(0);
+        }
+    }
+
+    private void HandleBot(Client client, Room room, string[] f)
+    {
+        if (room.Host != client)
+        {
+            client.Send(Protocol.Encode(Protocol.Error, "Nur der Host kann Bots verwalten."));
+            return;
+        }
+        if (room.Match != null)
+        {
+            client.Send(Protocol.Encode(Protocol.Error, "Waehrend einer Runde geht das nicht."));
+            return;
+        }
+        string sub = f.Length > 1 ? f[1] : string.Empty;
+        switch (sub)
+        {
+            case Protocol.BotAdd:
+                if (room.Members.Count >= Protocol.MaxPlayers)
+                {
+                    client.Send(Protocol.Encode(Protocol.Error, $"Raum ist voll ({Protocol.MaxPlayers} Spieler)."));
+                    return;
+                }
+                Client bot = Client.CreateBot(++nextClientId, Bots.PickName(room.Members.Select(m => m.Initials), random), Bots.PickCharacter(random), room.BotLevel);
+                bot.Room = room;
+                room.Members.Add(bot);
+                Log($"[{room.Name}] bot {bot.Initials} added ({Bots.LevelName(bot.BotLevel)})");
+                break;
+            case Protocol.BotRemove:
+                Client? last = room.Members.LastOrDefault(m => m.IsBot);
+                if (last == null)
+                {
+                    return;
+                }
+                room.Members.Remove(last);
+                last.Room = null;
+                break;
+            case Protocol.BotLevel:
+                if (f.Length < 3 || !Protocol.TryInt(f[2], out int level))
+                {
+                    return;
+                }
+                room.BotLevel = Bots.ClampLevel(level);
+                foreach (Client b in room.Members.Where(m => m.IsBot))
+                {
+                    b.BotLevel = room.BotLevel;
+                }
+                break;
+            default:
+                return;
+        }
+        BroadcastLobby(room);
+    }
+
+    /// <summary>Advances the bots of a running match; they finish at the latest shortly after the last human.</summary>
+    private void TickBots(Room room, Match m, DateTime now)
+    {
+        List<Participant> bots = m.Participants.Where(p => p.Client.IsBot && p.Status == Protocol.StatusPlaying).ToList();
+        if (bots.Count == 0)
+        {
+            return;
+        }
+        bool humansDone = m.Participants.Where(p => !p.Client.IsBot).All(p => p.Finished);
+        foreach (Participant bot in bots)
+        {
+            TimeSpan elapsed = now - bot.BotStartedAt;
+            if (humansDone || elapsed >= bot.BotDuration)
+            {
+                bot.Score = bot.BotTarget;
+                bot.Status = Protocol.StatusDone;
+            }
+            else
+            {
+                bot.Score = Bots.LiveScore(bot.BotTarget, elapsed, bot.BotDuration);
+            }
+        }
+        CheckFinished(room, m);
+    }
+
     private void BroadcastLobby(Room room)
     {
         Client? host = room.Host;
@@ -581,13 +703,14 @@ public sealed partial class GameServer
             room.Name,
             Protocol.Int(host?.Id ?? 0),
             room.Match != null ? Protocol.StateMatch : Protocol.StateLobby,
+            Protocol.Int(room.BotLevel),
         };
         foreach (Client member in room.Members)
         {
             Participant? p = room.Match?.Find(member);
             string status = p?.Status ?? Protocol.StatusLobby;
             int score = p?.Score ?? 0;
-            fields.Add(Protocol.Join(Protocol.Int(member.Id), member.Initials, member.Character, status, Protocol.Int(score)));
+            fields.Add(Protocol.Join(Protocol.Int(member.Id), member.Initials, member.Character, status, Protocol.Int(score), member.IsBot ? "1" : "0"));
         }
         string line = Protocol.Encode(fields.ToArray());
         foreach (Client member in room.Members)
@@ -631,7 +754,7 @@ public sealed partial class GameServer
             p.Status = Protocol.StatusLeft;
             p.Score = 0;
         }
-        if (room.Members.Count == 0)
+        if (!room.Members.Any(x => !x.IsBot))
         {
             rooms.Remove(room.Name);
             Log($"[{room.Name}] room closed");
@@ -652,6 +775,32 @@ public sealed partial class GameServer
 
 internal sealed class Client
 {
+    /// <summary>A server-side bot: lives only in a room, has no connection.</summary>
+    public static Client CreateBot(int id, string initials, string character, int level)
+    {
+        return new Client(id, initials, character, level);
+    }
+
+    private Client(int id, string initials, string character, int level)
+    {
+        Id = id;
+        IsBot = true;
+        BotLevel = level;
+        Initials = initials;
+        Character = character;
+        Tcp = null!;
+        Stream = null!;
+        Remote = "bot";
+        Address = IPAddress.None;
+        LastSeen = ConnectedAt = DateTime.UtcNow;
+        Nonce = string.Empty;
+        Outbox.Writer.TryComplete();
+    }
+
+    public bool IsBot { get; }
+
+    public int BotLevel { get; set; }
+
     public Client(int id, TcpClient tcp)
     {
         Id = id;
@@ -688,6 +837,10 @@ internal sealed class Client
 
     public void Send(string line)
     {
+        if (IsBot)
+        {
+            return;
+        }
         Outbox.Writer.TryWrite(line);
     }
 
@@ -741,7 +894,8 @@ internal sealed class Room
 
     public string Name { get; }
     public List<Client> Members { get; } = new();
-    public Client? Host => Members.Count > 0 ? Members[0] : null;
+    public Client? Host => Members.FirstOrDefault(m => !m.IsBot);
+    public int BotLevel { get; set; } = Bots.DefaultLevel;
     public Match? Match { get; set; }
 }
 
@@ -776,6 +930,11 @@ internal sealed class Participant
     public string Initials { get; }
     public string Character { get; }
     public string Status { get; set; } = Protocol.StatusLoading;
+
+    // bots only
+    public int BotTarget { get; set; }
+    public TimeSpan BotDuration { get; set; }
+    public DateTime BotStartedAt { get; set; }
     public int Score { get; set; }
     public bool Finished => Status == Protocol.StatusDone || Status == Protocol.StatusLeft;
 }
