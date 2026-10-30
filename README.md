@@ -70,6 +70,7 @@ cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
    (Enter übernimmt, Esc bricht ab), Links/Rechts ändert Figur & Co. Initialen gehen auch
    arcade-mäßig mit Hoch/Runter pro Buchstabe. Maus funktioniert ebenfalls.
    Alle Mitspieler nutzen denselben Server und denselben Raumnamen.
+   Rechts steht deine gewählte Figur mit einem ihrer Sprüche aus der Figurenauswahl des Spiels.
 3. Sobald mindestens zwei Spieler (oder Bots) im Raum sind, wählt der Host die Disziplin
    und startet die Runde.
 4. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.

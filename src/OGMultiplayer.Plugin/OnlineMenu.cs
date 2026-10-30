@@ -42,8 +42,6 @@ namespace OGMultiplayer.Plugin
             public Action Submit;
             public Action<int> Horizontal;
             public Field Edit;
-            public Image Portrait;
-            public Func<string> PortraitId;
             public RectTransform ArrowLeft;
             public RectTransform ArrowRight;
         }
@@ -101,6 +99,23 @@ namespace OGMultiplayer.Plugin
         private string editBuffer = string.Empty;
         private int initialsCursor;
 
+        private static Sprite balloonSprite;
+        private static Sprite tailSprite;
+
+        // selected character with its punchline, like the game's character select
+        private Image showcasePortrait;
+        private RectTransform bubble;
+        private Text bubbleText;
+        private string showcaseId;
+        private string quoteKey;
+        private float quoteRevealAt;
+
+        private static readonly Color32 BalloonFill = new Color32(250, 246, 242, 255);
+        private static readonly Color32 BalloonOutline = new Color32(0, 0, 0, 255);
+        private static readonly Color QuoteColor = new Color(0.16078432f, 33f / 85f, 32f / 85f, 1f);
+
+        /// <summary>One game pixel in canvas units (the game renders 216 pixels high, the canvas is 800).</summary>
+        private const float GamePixel = 800f / 216f;
 
         private void Awake()
         {
@@ -278,6 +293,10 @@ namespace OGMultiplayer.Plugin
             playerPortraits.Clear();
             subtitle = null;
             footer = null;
+            showcasePortrait = null;
+            bubble = null;
+            bubbleText = null;
+            showcaseId = null;
             switch (page)
             {
                 case Page.Choice:
@@ -289,6 +308,10 @@ namespace OGMultiplayer.Plugin
                 case Page.Lobby:
                     RenderLobby();
                     break;
+            }
+            if (page != Page.Choice)
+            {
+                BuildShowcase();
             }
             selection = Mathf.Clamp(selection, 0, Mathf.Max(0, rows.Count - 1));
             renderedSignature = Signature();
@@ -397,10 +420,7 @@ namespace OGMultiplayer.Plugin
 
         private void AddCharacterRow(Vector2 position)
         {
-            Row row = AddRow("Character", () => "FIGUR: " + CharacterName(), position, () => ChangeCharacter(1), horizontal: ChangeCharacter);
-            row.Portrait = NewImage(pageRoot, "CharacterPortrait", Color.white, position + new Vector2(380f, 0f), new Vector2(42f, 50f));
-            row.Portrait.preserveAspect = true;
-            row.PortraitId = () => characters.Count > 0 ? characters[characterIndex].id : null;
+            AddRow("Character", () => "FIGUR: " + CharacterName(), position, () => ChangeCharacter(1), horizontal: ChangeCharacter);
         }
 
         private void ChangeCharacter(int direction)
@@ -472,10 +492,6 @@ namespace OGMultiplayer.Plugin
                 {
                     row.Label.text = text;
                 }
-                if (row.Portrait != null)
-                {
-                    SetPortrait(row.Portrait, row.PortraitId());
-                }
             }
             if (page == Page.Lobby && Session != null && !Session.Connected)
             {
@@ -509,6 +525,7 @@ namespace OGMultiplayer.Plugin
                         : $"{Session.HostInitials()} WAEHLT DIE DISZIPLIN.";
                 }
             }
+            UpdateShowcase();
             if (page == Page.Connect && footer != null)
             {
                 footer.text = editing != Field.None ? EditHint() : (Session.LastError ?? string.Empty).ToUpperInvariant();
@@ -550,6 +567,160 @@ namespace OGMultiplayer.Plugin
             image.sprite = sprite;
             image.color = entry != null ? entry.tint : Color.white;
             image.enabled = sprite != null;
+        }
+
+        // ------------------------------------------------------------------ character showcase
+
+        private void BuildShowcase()
+        {
+            showcasePortrait = NewImage(pageRoot, "ShowcasePortrait", Color.white, Vector2.zero, new Vector2(200f, 250f));
+            showcasePortrait.preserveAspect = true;
+            AnchorRight(showcasePortrait.rectTransform, new Vector2(-150f, -205f));
+
+            EnsureBalloonSprites();
+            Image balloon = NewImage(pageRoot, "QuoteBubble", Color.white, Vector2.zero, new Vector2(340f, 80f));
+            balloon.sprite = balloonSprite;
+            balloon.type = Image.Type.Sliced;
+            balloon.pixelsPerUnitMultiplier = 1f / GamePixel;
+            bubble = balloon.rectTransform;
+            bubble.anchorMin = bubble.anchorMax = new Vector2(1f, 0.5f);
+            bubble.pivot = new Vector2(1f, 0f);
+            bubble.anchoredPosition = new Vector2(-40f, -60f);
+
+            Image tail = NewImage(bubble, "Tail", Color.white, Vector2.zero, new Vector2(9f, 7f) * GamePixel);
+            tail.sprite = tailSprite;
+            RectTransform tailRect = tail.rectTransform;
+            tailRect.anchorMin = tailRect.anchorMax = new Vector2(0.68f, 0f);
+            tailRect.pivot = new Vector2(0.5f, 1f);
+            tailRect.anchoredPosition = new Vector2(0f, GamePixel);
+
+            var textGo = new GameObject("Quote", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            textGo.transform.SetParent(bubble, false);
+            bubbleText = textGo.GetComponent<Text>();
+            bubbleText.font = BitmapScoreUI.ResolvePixelFont(font);
+            bubbleText.fontSize = 14;
+            bubbleText.lineSpacing = 1.3333334f;
+            bubbleText.color = QuoteColor;
+            bubbleText.alignment = TextAnchor.MiddleLeft;
+            bubbleText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            bubbleText.verticalOverflow = VerticalWrapMode.Overflow;
+            bubbleText.supportRichText = false;
+            bubbleText.raycastTarget = false;
+            RectTransform tr = bubbleText.rectTransform;
+            tr.anchorMin = Vector2.zero;
+            tr.anchorMax = Vector2.one;
+            tr.offsetMin = new Vector2(5f * GamePixel, 3f * GamePixel);
+            tr.offsetMax = new Vector2(-5f * GamePixel, -3f * GamePixel);
+            bubble.gameObject.SetActive(false);
+        }
+
+        private static void AnchorRight(RectTransform rect, Vector2 position)
+        {
+            rect.anchorMin = rect.anchorMax = new Vector2(1f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = position;
+        }
+
+        private void UpdateShowcase()
+        {
+            if (showcasePortrait == null || bubble == null)
+            {
+                return;
+            }
+            CharacterSelect2DConfig.CharacterEntry entry = characters.Count > 0 ? characters[characterIndex] : null;
+            string id = entry?.id;
+            Sprite sprite = entry == null ? null : entry.bigPortrait != null ? entry.bigPortrait : entry.portrait;
+            showcasePortrait.sprite = sprite;
+            showcasePortrait.color = entry != null ? entry.tint : Color.white;
+            showcasePortrait.enabled = sprite != null;
+            if (id != showcaseId)
+            {
+                // new character: bubble pops up with a fresh line after the game's focus delay
+                showcaseId = id;
+                quoteKey = null;
+                quoteRevealAt = Time.unscaledTime + 0.35f;
+                bubble.gameObject.SetActive(false);
+            }
+            if (quoteKey == null && id != null && Time.unscaledTime >= quoteRevealAt && CharacterQuotes.GetCount(id) > 0)
+            {
+                quoteKey = CharacterQuotes.DrawNext(id);
+                bubbleText.text = GameLocalization.Get(quoteKey);
+                float width = 340f;
+                float textWidth = width - 10f * GamePixel;
+                var settings = bubbleText.GetGenerationSettings(new Vector2(textWidth, 0f));
+                float textHeight = bubbleText.cachedTextGeneratorForLayout.GetPreferredHeight(bubbleText.text, settings) / bubbleText.pixelsPerUnit;
+                bubble.sizeDelta = new Vector2(width, Mathf.Ceil((textHeight + 6f * GamePixel) / GamePixel) * GamePixel);
+                bubble.gameObject.SetActive(!string.IsNullOrEmpty(bubbleText.text));
+            }
+        }
+
+        /// <summary>Pixel balloon (9-slice) and tail in the colours of the game's quote bubble.</summary>
+        private static void EnsureBalloonSprites()
+        {
+            if (balloonSprite != null && tailSprite != null)
+            {
+                return;
+            }
+            const int size = 12;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    int dx = Math.Min(x, size - 1 - x);
+                    int dy = Math.Min(y, size - 1 - y);
+                    Color32 c;
+                    if (dx + dy < 2)
+                    {
+                        c = new Color32(0, 0, 0, 0); // cut corner
+                    }
+                    else if (dx == 0 || dy == 0 || dx + dy == 2)
+                    {
+                        c = BalloonOutline;
+                    }
+                    else
+                    {
+                        c = BalloonFill;
+                    }
+                    pixels[y * size + x] = c;
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply();
+            tex.hideFlags = HideFlags.HideAndDontSave;
+            balloonSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, new Vector4(4, 4, 4, 4));
+
+            const int tw = 9, th = 7;
+            var tail = new Texture2D(tw, th, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            var tp = new Color32[tw * th];
+            for (int y = 0; y < th; y++)
+            {
+                // row 0 is the tip at the bottom, the top row joins the balloon
+                int row = th - 1 - y;
+                int left = row, right = tw - 1 - row;
+                for (int x = 0; x < tw; x++)
+                {
+                    Color32 c = new Color32(0, 0, 0, 0);
+                    if (y == th - 1 && x > left && x < right)
+                    {
+                        c = BalloonFill;
+                    }
+                    else if (x == left || x == right)
+                    {
+                        c = BalloonOutline;
+                    }
+                    else if (x > left && x < right)
+                    {
+                        c = BalloonFill;
+                    }
+                    tp[y * tw + x] = c;
+                }
+            }
+            tail.SetPixels32(tp);
+            tail.Apply();
+            tail.hideFlags = HideFlags.HideAndDontSave;
+            tailSprite = Sprite.Create(tail, new Rect(0, 0, tw, th), new Vector2(0.5f, 1f), 100f);
         }
 
         // ------------------------------------------------------------------ inline editing
