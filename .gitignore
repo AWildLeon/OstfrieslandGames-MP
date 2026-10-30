@@ -1,0 +1,13 @@
+bin/
+obj/
+build/
+result
+result-*
+*.user
+.vs/
+.idea/
+# never commit game files
+OG_Data/
+OG.x86_64
+BepInEx/
+*.tar.zst
