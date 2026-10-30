@@ -1,0 +1,53 @@
+name: Release
+
+# Tag vX.Y.Z pushen -> Tests, Server-Binaries fuer Linux/Windows, GitHub-Release.
+# Das Plugin wird nicht als DLL verteilt: es wird bei der Installation gegen die
+# eigene Spielkopie gebaut (scripts/install.sh / nix run .#install).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag (z. B. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    # ci.yml enthaelt den Dependabot-Automerge-Job; der laeuft hier nie, seine
+    # Berechtigungen muessen aber erlaubt sein.
+    permissions:
+      contents: write
+      pull-requests: write
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Server veroeffentlichen
+        run: |
+          mkdir -p dist
+          for rid in linux-x64 linux-arm64 win-x64; do
+            dotnet publish src/OGMultiplayer.Server -c Release -r "$rid" --self-contained \
+              -p:PublishSingleFile=true -p:Version="${TAG#v}" -o "out/$rid"
+            (cd "out/$rid" && zip -q -r "../../dist/OGMultiplayer.Server-${TAG}-${rid}.zip" .)
+          done
+          (cd dist && sha256sum ./*.zip > SHA256SUMS)
+      - name: Release erstellen
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "$TAG" --generate-notes --target "$GITHUB_SHA"
+          fi

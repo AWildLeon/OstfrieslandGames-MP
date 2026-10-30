@@ -12,7 +12,7 @@
       bepinexVersion = "5.4.23.4";
       bepinexZip = pkgs: pkgs.fetchurl {
         url = "https://github.com/BepInEx/BepInEx/releases/download/v${bepinexVersion}/BepInEx_linux_x64_${bepinexVersion}.zip";
-        hash = "sha256-JyLDfGklHh/o0lcHyOz0HZuMktgxHGgyqkd3yduawPY=";
+        hash = "sha256-JyLDfGklHh/o0lcHyOz0HZuMktgxHGgyqkd3yduawPY="; # bepinex
       };
     in
     {

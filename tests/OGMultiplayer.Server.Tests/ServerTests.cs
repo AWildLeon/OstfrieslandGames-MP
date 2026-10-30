@@ -1,0 +1,310 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using OGMultiplayer;
+using OGMultiplayer.Server;
+using Xunit;
+
+namespace OGMultiplayer.Server.Tests;
+
+public sealed class TestClient : IDisposable
+{
+    private readonly TcpClient tcp;
+    private readonly StreamReader reader;
+    private readonly StreamWriter writer;
+
+    public TestClient(int port)
+    {
+        tcp = new TcpClient();
+        tcp.Connect(IPAddress.Loopback, port);
+        var stream = tcp.GetStream();
+        reader = new StreamReader(stream, new UTF8Encoding(false));
+        writer = new StreamWriter(stream, new UTF8Encoding(false)) { NewLine = "\n", AutoFlush = true };
+        Challenge = Next(Protocol.Challenge);
+    }
+
+    public string[] Challenge { get; }
+
+    public int Id { get; private set; }
+
+    public void Send(params string[] fields) => writer.WriteLine(Protocol.Encode(fields));
+
+    public string[] Hello(string initials, string room = "raum", string? password = null)
+    {
+        string proof = password == null ? string.Empty : Protocol.AuthProof(password, Challenge[2]);
+        Send(Protocol.Hello, Protocol.Int(Protocol.Version), initials, "tim", room, proof);
+        string[] reply = Next(Protocol.Welcome, Protocol.Error);
+        if (reply[0] == Protocol.Welcome)
+        {
+            Id = int.Parse(reply[1]);
+        }
+        return reply;
+    }
+
+    /// <summary>Reads until a line with one of the given commands arrives (others are skipped).</summary>
+    public string[] Next(params string[] commands)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (true)
+        {
+            string? line = reader.ReadLineAsync(cts.Token).AsTask().GetAwaiter().GetResult();
+            if (line == null)
+            {
+                return new[] { "EOF" };
+            }
+            string[] f = Protocol.Decode(line);
+            if (commands.Contains(f[0]))
+            {
+                return f;
+            }
+        }
+    }
+
+    public bool IsClosed()
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                if (reader.ReadLineAsync(cts.Token).AsTask().GetAwaiter().GetResult() == null)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    public void Dispose() => tcp.Dispose();
+}
+
+public sealed class ServerFixture : IAsyncDisposable
+{
+    public ServerFixture(string? password = null)
+    {
+        Server = new GameServer(new ServerOptions
+        {
+            Bind = IPAddress.Loopback,
+            Port = 0,
+            Password = password,
+            Console = false,
+            ReadyTimeout = TimeSpan.FromSeconds(30),
+        });
+        Run = Server.RunAsync(CancellationToken.None);
+        Server.Started.Wait(TimeSpan.FromSeconds(5));
+    }
+
+    public GameServer Server { get; }
+
+    public Task Run { get; }
+
+    public TestClient Connect() => new(Server.BoundPort);
+
+    public async ValueTask DisposeAsync()
+    {
+        await Server.RequestShutdown(null, TimeSpan.Zero);
+        await Run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+}
+
+public class ProtocolTests
+{
+    [Fact]
+    public void AuthProofIsHmacSha256Hex()
+    {
+        Assert.Equal(
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8",
+            Protocol.AuthProof("key", "The quick brown fox jumps over the lazy dog"));
+    }
+
+    [Theory]
+    [InlineData("abc", "ABC")]
+    [InlineData(" xyz ", "XYZ")]
+    [InlineData("ab", null)]
+    [InlineData("a1c", null)]
+    [InlineData("ÄBC", null)]
+    public void NormalizeInitials(string input, string? expected) => Assert.Equal(expected, Protocol.NormalizeInitials(input));
+
+    [Fact]
+    public void EncodeStripsSeparators()
+    {
+        Assert.Equal(new[] { "MSG", "ab c" }, Protocol.Decode(Protocol.Encode("MSG", "a\tb\n c")));
+    }
+}
+
+public class ServerTests
+{
+    [Fact]
+    public async Task OpenServerAcceptsPlayers()
+    {
+        await using var fx = new ServerFixture();
+        using var a = fx.Connect();
+        Assert.Equal("0", a.Challenge[3]);
+        Assert.Equal(Protocol.Welcome, a.Hello("AAA")[0]);
+        string[] lobby = a.Next(Protocol.Lobby);
+        Assert.Equal("raum", lobby[1]);
+        Assert.Equal(a.Id.ToString(), lobby[2]);
+    }
+
+    [Fact]
+    public async Task PasswordIsChecked()
+    {
+        await using var fx = new ServerFixture("geheim");
+        using var ok = fx.Connect();
+        Assert.Equal("1", ok.Challenge[3]);
+        Assert.Equal(Protocol.Welcome, ok.Hello("AAA", password: "geheim")[0]);
+
+        using var wrong = fx.Connect();
+        Assert.Equal(Protocol.Error, wrong.Hello("BBB", password: "falsch")[0]);
+        Assert.True(wrong.IsClosed());
+
+        using var missing = fx.Connect();
+        Assert.Equal(Protocol.Error, missing.Hello("CCC")[0]);
+    }
+
+    [Fact]
+    public async Task RepeatedWrongPasswordsLockTheAddress()
+    {
+        await using var fx = new ServerFixture("geheim");
+        for (int i = 0; i < 5; i++)
+        {
+            using var c = fx.Connect();
+            c.Hello("AAA", password: "falsch");
+        }
+        using var right = fx.Connect();
+        string[] reply = right.Hello("AAA", password: "geheim");
+        Assert.Equal(Protocol.Error, reply[0]);
+        Assert.Contains("Zu viele", reply[1]);
+
+        fx.Server.ExecuteAdmin("unban 127.0.0.1");
+        using var again = fx.Connect();
+        Assert.Equal(Protocol.Welcome, again.Hello("AAA", password: "geheim")[0]);
+    }
+
+    [Fact]
+    public async Task FullMatchFlow()
+    {
+        await using var fx = new ServerFixture();
+        using var host = fx.Connect();
+        using var guest = fx.Connect();
+        host.Hello("HST");
+        guest.Hello("GST");
+
+        guest.Send(Protocol.Start, "0");
+        Assert.Equal(Protocol.Error, guest.Next(Protocol.Error)[0]);
+
+        host.Send(Protocol.Start, "4");
+        string[] begin = host.Next(Protocol.Begin);
+        guest.Next(Protocol.Begin);
+        Assert.Equal("4", begin[2]);
+        Assert.Equal(4, begin.Length - 1);
+        string matchId = begin[1];
+
+        host.Send(Protocol.Ready, matchId);
+        guest.Send(Protocol.Ready, matchId);
+        Assert.Equal(matchId, host.Next(Protocol.Go)[1]);
+        Assert.Equal(matchId, guest.Next(Protocol.Go)[1]);
+
+        host.Send(Protocol.Score, matchId, "1200");
+        guest.Send(Protocol.Score, matchId, "-5");
+        string[] result = host.Next(Protocol.Result);
+        Assert.Contains($"{host.Id}|1200", result);
+        Assert.Contains($"{guest.Id}|0", result);
+        guest.Next(Protocol.Result);
+    }
+
+    [Fact]
+    public async Task LeavingPlayerScoresZero()
+    {
+        await using var fx = new ServerFixture();
+        using var host = fx.Connect();
+        using var guest = fx.Connect();
+        host.Hello("HST");
+        guest.Hello("GST");
+        host.Send(Protocol.Start, "0");
+        string matchId = host.Next(Protocol.Begin)[1];
+        host.Send(Protocol.Ready, matchId);
+        guest.Send(Protocol.Leave, matchId);
+        host.Next(Protocol.Go);
+        host.Send(Protocol.Score, matchId, "300");
+        string[] result = host.Next(Protocol.Result);
+        Assert.Contains($"{guest.Id}|0", result);
+    }
+
+    [Fact]
+    public async Task RoomIsLimitedToFourPlayers()
+    {
+        await using var fx = new ServerFixture();
+        var clients = Enumerable.Range(0, 4).Select(_ => fx.Connect()).ToList();
+        foreach (var (c, i) in clients.Select((c, i) => (c, i)))
+        {
+            Assert.Equal(Protocol.Welcome, c.Hello("AA" + (char)('A' + i))[0]);
+        }
+        using var fifth = fx.Connect();
+        Assert.Equal(Protocol.Error, fifth.Hello("EEE")[0]);
+        clients.ForEach(c => c.Dispose());
+    }
+
+    [Fact]
+    public async Task AdminKickBanAndSay()
+    {
+        await using var fx = new ServerFixture();
+        using var a = fx.Connect();
+        using var b = fx.Connect();
+        a.Hello("AAA");
+        b.Hello("BBB");
+
+        Assert.Contains("An 2 Spieler", fx.Server.ExecuteAdmin("say Hallo"));
+        Assert.Equal("Hallo", a.Next(Protocol.Msg)[1]);
+
+        Assert.Contains("getrennt", fx.Server.ExecuteAdmin($"kick {b.Id} spam"));
+        Assert.Contains("spam", b.Next(Protocol.Bye)[1]);
+
+        Assert.Contains("127.0.0.1 gesperrt", fx.Server.ExecuteAdmin($"ban {a.Id}"));
+        Assert.Equal(Protocol.Bye, a.Next(Protocol.Bye)[0]);
+        Assert.Contains("127.0.0.1", fx.Server.ExecuteAdmin("bans"));
+        Assert.Contains("entsperrt", fx.Server.ExecuteAdmin("unban 127.0.0.1"));
+
+        Assert.Contains("Unbekannter Befehl", fx.Server.ExecuteAdmin("quatsch"));
+        Assert.Contains("shutdown", fx.Server.ExecuteAdmin("help"));
+    }
+
+    [Fact]
+    public async Task AdminEndMatchAndPassword()
+    {
+        await using var fx = new ServerFixture();
+        using var host = fx.Connect();
+        using var guest = fx.Connect();
+        host.Hello("HST");
+        guest.Hello("GST");
+        host.Send(Protocol.Start, "1");
+        host.Next(Protocol.Begin);
+        Assert.Contains("beendet", fx.Server.ExecuteAdmin("endmatch raum"));
+        Assert.Equal(Protocol.Result, host.Next(Protocol.Result)[0]);
+
+        fx.Server.ExecuteAdmin("password neu");
+        using var c = fx.Connect();
+        Assert.Equal("1", c.Challenge[3]);
+        Assert.Equal(Protocol.Welcome, c.Hello("CCC", "anderer", "neu")[0]);
+    }
+
+    [Fact]
+    public async Task ShutdownSaysGoodbye()
+    {
+        var fx = new ServerFixture();
+        using var a = fx.Connect();
+        a.Hello("AAA");
+        fx.Server.ExecuteAdmin("shutdown 1 Wartung");
+        Assert.Contains("Wartung", a.Next(Protocol.Msg)[1]);
+        Assert.Equal("Wartung", a.Next(Protocol.Bye)[1]);
+        await fx.Run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+}

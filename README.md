@@ -14,6 +14,8 @@ Original-Ergebnisbildschirm des Spiels.
 - der erste Spieler im Raum ist Host und wählt Disziplin bzw. Revanche
 - wer abbricht oder die Verbindung verliert, bekommt 0 Punkte – die Runde läuft für die anderen weiter
 - lokale Bestenliste: nur der eigene Score wird auf dem eigenen Rechner gespeichert
+- keine Verbindungen zur Online-Bestenliste des Spiels, solange der Online-Modus verbunden ist;
+  Online-Runden landen nie in der weltweiten Bestenliste
 
 > **Keine Spieldateien im Repo.** Der Mod wird gegen deine eigene Spielinstallation
 > kompiliert; BepInEx wird beim Installieren direkt von dessen GitHub-Releases geladen.
@@ -70,7 +72,17 @@ cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
 Unten rechts siehst du während einer Runde alle Spieler mit Status und Punkten.
 
 Einstellungen landen in `BepInEx/config/de.onlh.ostfriesland.multiplayer.cfg`
-(Server, Passwort, Raum, Initialen, Figur, Taste für das Fenster, Ecke für die Spielerliste).
+(Server, Passwort, Raum, Initialen, Figur, Taste für das Fenster, Ecke für die Spielerliste,
+`Privacy.BlockScoreApiWhileOnline`).
+
+### Online-Bestenliste des Spiels
+
+Das Spiel schickt Scores an eine eigene Score-API (`OnlineScoreSync`). Solange der Mod mit
+einem Server verbunden ist oder eine Online-Runde offen ist, blockiert der Mod **jede**
+Anfrage dorthin (Abruf der Bestenliste, Sitzung, Upload). Für das Spiel sieht das wie ein
+Netzwerkfehler aus; nach dem Trennen läuft alles wieder normal. Scores aus Online-Runden
+werden nur lokal gespeichert und nie zum Hochladen vorgemerkt.
+Abschalten: `BlockScoreApiWhileOnline = false` (Online-Runden bleiben trotzdem lokal).
 
 ## Server
 
@@ -84,12 +96,38 @@ oder ohne Nix:
 dotnet run -c Release --project src/OGMultiplayer.Server -- --port 27420
 ```
 
+Fertige Server-Binaries (Linux x64/arm64, Windows) gibt es unter
+[Releases](https://github.com/AWildLeon/Ostfriesland-Games-Multiplayer/releases).
+
 Optionen: `--port` (Standard 27420), `--bind` (Standard 0.0.0.0),
 `--ready-timeout <s>` (wie lange auf langsame Spieler gewartet wird, Standard 60),
 `--match-timeout <min>` (maximale Rundendauer, Standard 20),
-`--password-file <pfad>` (Server-Passwort, erste Zeile der Datei).
+`--password-file <pfad>` (Server-Passwort, erste Zeile der Datei),
+`--no-console` (keine Admin-Befehle von stdin).
 Port, Bind-Adresse und Passwort gehen auch per `OGMP_PORT` / `OGMP_BIND` /
 `OGMP_PASSWORD` bzw. `OGMP_PASSWORD_FILE`.
+
+### Admin-Befehle
+
+Der Server liest Befehle von seiner Standardeingabe – einfach ins Terminal tippen, in dem er läuft
+(für Dauerbetrieb z. B. in `tmux`/`screen`):
+
+| Befehl | Wirkung |
+| --- | --- |
+| `help` | alle Befehle |
+| `status` | Uptime, Verbindungen, Räume, Passwort, Bans |
+| `players` | alle Verbindungen mit ID, Raum, Status, IP |
+| `rooms` | Räume mit Host und laufender Runde |
+| `say <text>` / `sayroom <raum> <text>` | Nachricht, erscheint im Spiel |
+| `kick <id> [grund]` | Spieler trennen |
+| `ban <id\|ip> [grund]` / `unban <ip>` / `bans` | IP sperren (bis zum Neustart) |
+| `endmatch <raum>` | laufende Runde beenden, Unfertige bekommen 0 |
+| `closeroom <raum> [grund]` | alle Spieler eines Raums trennen |
+| `password <neu\|off>` | Passwort ändern/abschalten (bis zum Neustart) |
+| `shutdown [sekunden] [grund]` / `shutdown cancel` | Server beenden, optional mit Countdown im Spiel |
+
+Getrennte/gekickte Spieler sehen den Grund im F8-Fenster. Strg+C und `SIGTERM`
+(z. B. `systemctl stop`) beenden ebenfalls sauber und verabschieden alle Spieler.
 
 ### Passwort
 
@@ -155,13 +193,39 @@ Ergebnisbildschirm geöffnet.
 Protokoll: eine Nachricht pro Zeile, Felder per Tab getrennt – siehe
 [`src/Shared/Protocol.cs`](src/Shared/Protocol.cs).
 
+## Automatische Wartung (GitHub Actions)
+
+| Workflow | Wann | Was |
+| --- | --- | --- |
+| `CI` | Push, PR | Server-Tests (xUnit), `nix flake check`, Nix-Builds, shellcheck, actionlint |
+| `CI` → Dependabot-Automerge | Dependabot-PR | Patch/Minor-Updates nach grünem CI automatisch mergen |
+| `Wartung` | montags + manuell | `nix flake update` und neueste BepInEx-5-Version (Version + Hashes) einspielen, alles prüfen, PR erstellen und mergen |
+| `Release` | Tag `v*` | Tests, Server-Binaries bauen, GitHub-Release mit Changelog |
+| Dependabot | wöchentlich | GitHub-Actions- und Test-Abhängigkeiten |
+
+Einmalig in den Repo-Einstellungen nötig: *Settings → Actions → General → Workflow permissions*:
+„Read and write permissions“ und „Allow GitHub Actions to create and approve pull requests“.
+Wer `main` per Branch-Protection mit Pflicht-Checks schützt, muss die Wartungs-PRs von Hand
+mergen (PRs mit dem Actions-Token lösen keine weiteren Workflows aus).
+
+Neues Release: Version in `src/OGMultiplayer.Plugin/Plugin.cs` und `flake.nix` anheben, dann
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Nicht automatisierbar: ein Spiel-Update, das gepatchte Methoden ändert. Das Plugin meldet das
+beim Start im BepInEx-Log; dann `GameBridge.cs`/`Patches.cs` anpassen.
+
 ## Entwicklung
 
 ```
 src/Shared/Protocol.cs          gemeinsames Protokoll
 src/OGMultiplayer.Server/       Server (.NET 8, keine Abhängigkeiten)
 src/OGMultiplayer.Plugin/       BepInEx-5-Plugin (netstandard2.1)
+tests/OGMultiplayer.Server.Tests/  Server-Tests (Auth, Rundenablauf, Admin-Befehle)
 scripts/install.sh              BepInEx + Plugin installieren
+scripts/update-bepinex.sh       BepInEx-Pin auf neueste 5.x-Version heben
 flake.nix                       Pakete, Apps, NixOS-Modul, DevShell
 ```
 
@@ -171,6 +235,10 @@ nix develop
 
 ```bash
 dotnet build src/OGMultiplayer.Plugin -c Release -p:GameDir="/pfad/zu/Ostfriesland Games"
+```
+
+```bash
+dotnet test tests/OGMultiplayer.Server.Tests
 ```
 
 Getestet mit der Spielversion auf Unity 6000.4.0f1 (Mono) und BepInEx 5.4.23.4 unter Linux.

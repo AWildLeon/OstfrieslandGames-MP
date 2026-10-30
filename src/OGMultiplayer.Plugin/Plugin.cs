@@ -24,6 +24,7 @@ namespace OGMultiplayer.Plugin
         internal static ConfigEntry<string> Character;
         internal static ConfigEntry<KeyCode> ToggleKey;
         internal static ConfigEntry<HudCorner> HudPosition;
+        internal static ConfigEntry<bool> BlockScoreApi;
 
         private Harmony harmony;
 
@@ -37,6 +38,7 @@ namespace OGMultiplayer.Plugin
             Initials = Config.Bind("Player", "Initials", "", "Deine drei Initialen (A-Z).");
             Character = Config.Bind("Player", "Character", "tim", "Figur-ID.");
             ToggleKey = Config.Bind("UI", "ToggleKey", KeyCode.F8, "Taste fuer das Online-Fenster.");
+            BlockScoreApi = Config.Bind("Privacy", "BlockScoreApiWhileOnline", true, "Keine Verbindungen zur Online-Bestenliste des Spiels, solange der Online-Modus verbunden ist. Online-Runden landen nie in der weltweiten Bestenliste.");
             HudPosition = Config.Bind("UI", "HudPosition", HudCorner.BottomRight, "Ecke fuer die Spielerliste waehrend einer Online-Runde.");
 
             foreach (string missing in GameBridge.MissingMembers())

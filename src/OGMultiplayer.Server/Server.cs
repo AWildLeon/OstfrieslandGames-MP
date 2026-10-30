@@ -27,30 +27,49 @@ public sealed class ServerOptions
 
     public int MaxAuthFailures { get; set; } = 5;
     public TimeSpan AuthFailureWindow { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Read admin commands from stdin.</summary>
+    public bool Console { get; set; } = true;
 }
 
-public sealed class GameServer
+public sealed partial class GameServer
 {
     private readonly ServerOptions options;
     private readonly object sync = new();
     private readonly Dictionary<string, Room> rooms = new(StringComparer.Ordinal);
     private readonly List<Client> clients = new();
     private readonly Dictionary<IPAddress, List<DateTime>> authFailures = new();
+    private readonly HashSet<IPAddress> bans = new();
+    private readonly DateTime startedAt = DateTime.UtcNow;
+    private CancellationTokenSource shutdown = new();
     private int nextClientId;
     private int nextMatchId;
+
+    /// <summary>Actual TCP port once listening (useful with port 0).</summary>
+    public int BoundPort { get; private set; }
+
+    /// <summary>Completed once the server listens.</summary>
+    public Task Started => started.Task;
+
+    private readonly TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public GameServer(ServerOptions options)
     {
         this.options = options;
     }
 
-    public async Task RunAsync(CancellationToken token)
+    public async Task RunAsync(CancellationToken externalToken)
     {
+        shutdown = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
+        CancellationToken token = shutdown.Token;
         var listener = new TcpListener(options.Bind, options.Port);
         listener.Start();
-        Log($"Listening on {options.Bind}:{options.Port} (protocol v{Protocol.Version}, "
+        BoundPort = ((IPEndPoint)listener.LocalEndpoint).Port;
+        started.TrySetResult();
+        Log($"Listening on {options.Bind}:{BoundPort} (protocol v{Protocol.Version}, "
             + (PasswordRequired ? "password required)" : "no password)"));
         _ = Task.Run(() => TickLoop(token), token);
+        StartAdmin(token);
         using var reg = token.Register(listener.Stop);
         while (!token.IsCancellationRequested)
         {
@@ -70,6 +89,12 @@ public sealed class GameServer
             Client client;
             lock (sync)
             {
+                IPAddress? ip = (tcp.Client.RemoteEndPoint as IPEndPoint)?.Address;
+                if (ip != null && bans.Contains(ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip))
+                {
+                    tcp.Close();
+                    continue;
+                }
                 if (clients.Count >= options.MaxConnections)
                 {
                     tcp.Close();
@@ -83,13 +108,23 @@ public sealed class GameServer
         Log("Shutting down");
     }
 
+    /// <summary>Sends BYE, flushes and closes the connection.</summary>
+    private void Kick(Client client, string reason)
+    {
+        client.Send(Protocol.Encode(Protocol.Bye, reason));
+        client.Closing = true;
+        client.Outbox.Writer.TryComplete();
+        Disconnect(client, "kicked: " + reason);
+    }
+
     private bool PasswordRequired => !string.IsNullOrEmpty(options.Password);
 
     private async Task ServeAsync(Client client, CancellationToken token)
     {
         Log($"#{client.Id} connected from {client.Remote}");
         client.Send(Protocol.Encode(Protocol.Challenge, Protocol.Int(Protocol.Version), client.Nonce, PasswordRequired ? "1" : "0"));
-        var writer = Task.Run(() => client.WriteLoopAsync(token), token);
+        // not bound to the shutdown token so a final BYE still gets flushed
+        var writer = Task.Run(() => client.WriteLoopAsync(CancellationToken.None));
         try
         {
             using var reader = new StreamReader(client.Stream, new UTF8Encoding(false), false, 1024, leaveOpen: true);

@@ -86,6 +86,9 @@ for (int i = 0; i < args.Length; i++)
             }
             i++;
             break;
+        case "--no-console":
+            options.Console = false;
+            break;
         case "-h":
         case "--help":
             Console.WriteLine("""
@@ -98,6 +101,10 @@ for (int i = 0; i < args.Length; i++)
                       --match-timeout <min>  Max. Dauer einer Runde (Standard 20)
                       --password-file <pfad> Server-Passwort aus Datei (erste Zeile; Env OGMP_PASSWORD_FILE)
                                              Alternativ Env OGMP_PASSWORD. Ohne Passwort ist der Server offen.
+                      --no-console           keine Admin-Befehle von stdin lesen
+
+                Admin-Befehle (stdin, 'help' fuer alle): status, players, rooms, say, kick, ban,
+                endmatch, closeroom, password, shutdown [sekunden] [grund] ...
                 """);
             return 0;
         default:
@@ -105,15 +112,24 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
-using var cts = new CancellationTokenSource();
+var server = new GameServer(options);
+Task run = server.RunAsync(CancellationToken.None);
 Console.CancelKeyPress += (_, e) =>
 {
     e.Cancel = true;
-    cts.Cancel();
+    _ = server.RequestShutdown(null, TimeSpan.Zero);
 };
-AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
+// SIGTERM (systemctl stop): say goodbye to the clients before the process exits
+AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+{
+    if (!run.IsCompleted)
+    {
+        _ = server.RequestShutdown(null, TimeSpan.Zero);
+        run.Wait(TimeSpan.FromSeconds(3));
+    }
+};
 
-await new GameServer(options).RunAsync(cts.Token);
+await run;
 return 0;
 
 static string? ReadPasswordFile(string path)

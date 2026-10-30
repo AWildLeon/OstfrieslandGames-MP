@@ -63,6 +63,9 @@ namespace OGMultiplayer.Plugin
             return Instance != null && c != null && Instance.controller == c;
         }
 
+        /// <summary>True while connected/connecting or an online match is open.</summary>
+        public static bool BlocksScoreApi => Instance != null && Plugin.BlockScoreApi.Value && (Instance.net != null || OnlineControllerActive);
+
         public static bool OnlineControllerActive => Instance != null && Instance.controller != null && HotSeatFlowController.Instance == Instance.controller;
 
         public bool MatchRunning => OnlineControllerActive && MatchId != 0 && !leftMatch && controller.Match != null && !controller.Match.IsComplete;
@@ -353,6 +356,14 @@ namespace OGMultiplayer.Plugin
                 case Protocol.Error:
                     LastError = f.ElementAtOrDefault(1) ?? "Fehler";
                     Toast(LastError);
+                    break;
+                case Protocol.Msg:
+                    Plugin.Log.LogInfo("Server: " + f.ElementAtOrDefault(1));
+                    Toast("Server: " + (f.ElementAtOrDefault(1) ?? string.Empty), 8f);
+                    break;
+                case Protocol.Bye:
+                    LastError = f.ElementAtOrDefault(1) ?? "Vom Server getrennt.";
+                    Toast(LastError, 8f);
                     break;
                 case Protocol.Lobby:
                     HandleLobby(f);

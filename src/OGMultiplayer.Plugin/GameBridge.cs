@@ -24,6 +24,8 @@ namespace OGMultiplayer.Plugin
         private static readonly MethodInfo RefreshEligibilityMethod = AccessTools.Method(typeof(HotSeatFlowController), "RefreshHighscoreEligibility");
         private static readonly MethodInfo PresentMenuMethod = AccessTools.Method(typeof(HotSeatFlowController), "PresentMenu");
         private static readonly PropertyInfo HighscoresSavedProp = AccessTools.Property(typeof(HotSeatMatch), "HighscoresSaved");
+        private static readonly FieldInfo ScoreDocField = AccessTools.Field(typeof(ScoreStore), "doc");
+        private static readonly MethodInfo ScoreSaveMethod = AccessTools.Method(typeof(ScoreStore), "Save", Type.EmptyTypes);
 
         private static CharacterSelect2DConfig cachedConfig;
         private static Font cachedFont;
@@ -41,6 +43,9 @@ namespace OGMultiplayer.Plugin
                 { "HotSeatFlowController.RefreshHighscoreEligibility", RefreshEligibilityMethod },
                 { "HotSeatFlowController.PresentMenu", PresentMenuMethod },
                 { "HotSeatMatch.HighscoresSaved", HighscoresSavedProp?.GetSetMethod(true) },
+                { "ScoreStore.doc", ScoreDocField },
+                { "ScoreStore.Save", ScoreSaveMethod },
+                { "OnlineScoreSync.Send", AccessTools.Method(typeof(OnlineScoreSync), "Send") },
             };
             return members.Where(kv => kv.Value == null).Select(kv => kv.Key);
         }
@@ -171,7 +176,10 @@ namespace OGMultiplayer.Plugin
             PresentMenuMethod.Invoke(controller, new object[] { HotSeatPhase.Results });
         }
 
-        /// <summary>Online variant of SaveHighscores: only the local player (slot 1) is stored on this machine.</summary>
+        /// <summary>
+        /// Online variant of SaveHighscores: only the local player (slot 1) is stored, and only
+        /// in the local list. Online-match scores never go to the game's worldwide leaderboard.
+        /// </summary>
         public static void SaveLocalHighscore(HotSeatFlowController controller)
         {
             HotSeatMatch match = controller.Match;
@@ -185,14 +193,13 @@ namespace OGMultiplayer.Plugin
             {
                 HotSeatPlayer local = match.Players[0];
                 bool qualifiesLocal = local.BestScore > 0 && ScoreStore.Instance.QualifiesForTop10(match.Discipline, local.BestScore);
-                bool qualifiesOnline = local.BestScore > 0 && OnlineScoreSync.Instance.QualifiesForTop10((int)match.Discipline, local.BestScore);
-                local.HighscoreEligible = qualifiesLocal || qualifiesOnline;
-                if (local.HighscoreEligible)
+                local.HighscoreEligible = qualifiesLocal;
+                local.HighscoreWorldwide = false;
+                if (qualifiesLocal)
                 {
-                    ScoreStore.Instance.Submit(match.Discipline, local.BestScore, local.Initials);
+                    SubmitLocalOnly(match.Discipline, local.BestScore, local.Initials);
                     local.HighscoreSaved = true;
-                    local.HighscoreLocal = qualifiesLocal;
-                    local.HighscoreWorldwide = qualifiesOnline;
+                    local.HighscoreLocal = true;
                 }
                 for (int i = 1; i < match.Players.Count; i++)
                 {
@@ -203,6 +210,24 @@ namespace OGMultiplayer.Plugin
             {
                 SubmittingField.SetValue(controller, false);
             }
+        }
+
+        /// <summary>Stores a score in the local list and takes it out of the upload outbox again.</summary>
+        private static void SubmitLocalOnly(DisciplineId discipline, int score, string nickname)
+        {
+            ScoreStore store = ScoreStore.Instance;
+            ScoreDocument doc = ScoreDocField?.GetValue(store) as ScoreDocument;
+            int before = doc?.outbox?.Count ?? -1;
+            store.Submit(discipline, score, nickname);
+            if (doc?.outbox == null || doc.outbox.Count <= before || ScoreSaveMethod == null)
+            {
+                Plugin.Log.LogWarning("Online-Score konnte nicht aus der Upload-Warteschlange genommen werden.");
+                return;
+            }
+            ScoreEntry entry = doc.outbox[doc.outbox.Count - 1];
+            entry.onlineReady = false;
+            doc.outbox.RemoveAt(doc.outbox.Count - 1);
+            ScoreSaveMethod.Invoke(store, null);
         }
 
         /// <summary>Best effort live score of the running discipline, -1 when unknown.</summary>

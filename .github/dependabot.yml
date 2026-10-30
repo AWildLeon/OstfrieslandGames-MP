@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: nuget
+    directory: /tests/OGMultiplayer.Server.Tests
+    schedule:
+      interval: weekly
+    groups:
+      test-deps:
+        patterns: ["*"]

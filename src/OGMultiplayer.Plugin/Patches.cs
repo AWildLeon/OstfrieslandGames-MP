@@ -1,3 +1,4 @@
+using System.Collections;
 using HarmonyLib;
 using OstfrieslandGames.Padstockspringen;
 using UnityEngine;
@@ -129,6 +130,38 @@ namespace OGMultiplayer.Plugin
             {
                 Session.LeaveMatch();
             }
+        }
+    }
+
+    /// <summary>
+    /// The game's own score API (OnlineScoreSync) sends every request through one coroutine.
+    /// While the online mode is in use, it is not started: the game treats it as a failed
+    /// request and retries later.
+    /// </summary>
+    [HarmonyPatch(typeof(OnlineScoreSync), "Send")]
+    internal static class ScoreApiPatch
+    {
+        private static bool logged;
+
+        private static bool Prefix(ref IEnumerator __result)
+        {
+            if (!OnlineSession.BlocksScoreApi)
+            {
+                logged = false;
+                return true;
+            }
+            if (!logged)
+            {
+                logged = true;
+                Plugin.Log.LogInfo("Score-API des Spiels gesperrt, solange der Online-Modus aktiv ist.");
+            }
+            __result = Empty();
+            return false;
+        }
+
+        private static IEnumerator Empty()
+        {
+            yield break;
         }
     }
 

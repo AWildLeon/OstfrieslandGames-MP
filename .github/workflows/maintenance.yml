@@ -1,0 +1,78 @@
+name: Wartung
+
+# Woechentlich: nixpkgs (flake.lock) und BepInEx aktualisieren, alles pruefen
+# und bei Erfolg automatisch per PR mergen.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: maintenance
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: automation/update-deps
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: flake.lock aktualisieren
+        run: nix flake update
+
+      - name: BepInEx aktualisieren
+        id: bepinex
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          version="$(scripts/update-bepinex.sh)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Aenderungen?
+        id: diff
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --cached --stat
+          fi
+
+      - name: Pruefen
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          dotnet test tests/OGMultiplayer.Server.Tests -c Release --blame-hang-timeout 60s
+          nix flake check
+          nix build .#server .#install .#play
+          ./result/bin/OGMultiplayer.Server --help > /dev/null
+
+      - name: PR erstellen und mergen
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          title="chore: Abhaengigkeiten aktualisieren"
+          if [ -n "${{ steps.bepinex.outputs.version }}" ]; then
+            title="$title (BepInEx ${{ steps.bepinex.outputs.version }})"
+          fi
+          git checkout -B "$BRANCH"
+          git commit -m "$title" -m "Automatisch durch den Wartungs-Workflow; Tests, flake check und Nix-Builds sind gruen."
+          git push --force origin "$BRANCH"
+          pr="$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url')"
+          if [ -z "$pr" ]; then
+            pr="$(gh pr create --head "$BRANCH" --base main --title "$title" \
+              --body "Automatische Wartung: \`nix flake update\` und BepInEx-Pin. Alle Pruefungen liefen in diesem Workflow-Lauf: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")"
+          fi
+          gh pr merge "$pr" --squash --delete-branch

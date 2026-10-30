@@ -35,6 +35,8 @@ namespace OGMultiplayer
     ///   GO       matchId
     ///   RESULT   matchId score*             (score = id|points)
     ///   PONG
+    ///   MSG      text                       (message from the server admin)
+    ///   BYE      reason                     (server closes the connection)
     /// </summary>
     public static class Protocol
     {
@@ -62,6 +64,8 @@ namespace OGMultiplayer
         public const string Go = "GO";
         public const string Result = "RESULT";
         public const string Pong = "PONG";
+        public const string Msg = "MSG";
+        public const string Bye = "BYE";
 
         public const string StatusLobby = "lobby";
         public const string StatusLoading = "loading";
