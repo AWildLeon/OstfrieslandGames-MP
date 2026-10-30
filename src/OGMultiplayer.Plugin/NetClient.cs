@@ -27,14 +27,14 @@ namespace OGMultiplayer.Plugin
 
         public string LastError { get; private set; }
 
-        public void Connect(string host, int port, string helloLine)
+        public void Connect(string host, int port)
         {
             if (thread != null)
             {
                 throw new InvalidOperationException("NetClient is single use.");
             }
             running = true;
-            thread = new Thread(() => Run(host, port, helloLine))
+            thread = new Thread(() => Run(host, port))
             {
                 IsBackground = true,
                 Name = "OGMultiplayer.Net"
@@ -42,7 +42,7 @@ namespace OGMultiplayer.Plugin
             thread.Start();
         }
 
-        private void Run(string host, int port, string helloLine)
+        private void Run(string host, int port)
         {
             try
             {
@@ -55,7 +55,6 @@ namespace OGMultiplayer.Plugin
                 tcp.EndConnect(ar);
                 stream = tcp.GetStream();
                 IsConnected = true;
-                Send(helloLine);
                 using (var reader = new StreamReader(stream, new UTF8Encoding(false)))
                 {
                     while (running)

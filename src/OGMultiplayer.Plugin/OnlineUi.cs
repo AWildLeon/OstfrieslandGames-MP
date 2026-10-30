@@ -28,6 +28,7 @@ namespace OGMultiplayer.Plugin
         private string host;
         private string portText;
         private string room;
+        private string password;
         private string initials;
         private int characterIndex;
         private List<GameBridge.CharacterInfo> characters = new List<GameBridge.CharacterInfo>();
@@ -46,6 +47,7 @@ namespace OGMultiplayer.Plugin
             host = Plugin.ServerHost.Value;
             portText = Plugin.ServerPort.Value.ToString();
             room = Plugin.RoomName.Value;
+            password = Plugin.ServerPassword.Value;
             initials = Plugin.Initials.Value;
         }
 
@@ -108,6 +110,7 @@ namespace OGMultiplayer.Plugin
                 Plugin.ServerPort.Value = port;
             }
             Plugin.RoomName.Value = (room ?? string.Empty).Trim().ToLowerInvariant();
+            Plugin.ServerPassword.Value = password ?? string.Empty;
             Plugin.Initials.Value = (initials ?? string.Empty).Trim().ToUpperInvariant();
             if (characters.Count > 0)
             {
@@ -289,6 +292,8 @@ namespace OGMultiplayer.Plugin
             host = GUILayout.TextField(host ?? string.Empty, 128);
             GUILayout.Label("Port");
             portText = GUILayout.TextField(portText ?? string.Empty, 5);
+            GUILayout.Label("Server-Passwort (leer = offener Server)");
+            password = GUILayout.PasswordField(password ?? string.Empty, '*', 128);
             GUILayout.Label("Raum (alle Mitspieler gleicher Raum)");
             room = GUILayout.TextField(room ?? string.Empty, 32);
             GUILayout.Label("Initialen (3 Buchstaben)");
@@ -306,7 +311,7 @@ namespace OGMultiplayer.Plugin
                 }
                 else
                 {
-                    Session.Connect(host, port, room, initials, characters.Count > 0 ? characters[characterIndex].Id : SelectedCharacter.DefaultId);
+                    Session.Connect(host, port, room, initials, characters.Count > 0 ? characters[characterIndex].Id : SelectedCharacter.DefaultId, password);
                 }
             }
             GUI.enabled = true;

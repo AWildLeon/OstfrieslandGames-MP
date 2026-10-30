@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Channels;
@@ -19,6 +20,13 @@ public sealed class ServerOptions
     public TimeSpan MatchTimeout { get; set; } = TimeSpan.FromMinutes(20);
     public TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(30);
     public int MaxConnections { get; set; } = 256;
+    public TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>Server password; null or empty = open server.</summary>
+    public string? Password { get; set; }
+
+    public int MaxAuthFailures { get; set; } = 5;
+    public TimeSpan AuthFailureWindow { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 public sealed class GameServer
@@ -27,6 +35,7 @@ public sealed class GameServer
     private readonly object sync = new();
     private readonly Dictionary<string, Room> rooms = new(StringComparer.Ordinal);
     private readonly List<Client> clients = new();
+    private readonly Dictionary<IPAddress, List<DateTime>> authFailures = new();
     private int nextClientId;
     private int nextMatchId;
 
@@ -39,7 +48,8 @@ public sealed class GameServer
     {
         var listener = new TcpListener(options.Bind, options.Port);
         listener.Start();
-        Log($"Listening on {options.Bind}:{options.Port} (protocol v{Protocol.Version})");
+        Log($"Listening on {options.Bind}:{options.Port} (protocol v{Protocol.Version}, "
+            + (PasswordRequired ? "password required)" : "no password)"));
         _ = Task.Run(() => TickLoop(token), token);
         using var reg = token.Register(listener.Stop);
         while (!token.IsCancellationRequested)
@@ -73,9 +83,12 @@ public sealed class GameServer
         Log("Shutting down");
     }
 
+    private bool PasswordRequired => !string.IsNullOrEmpty(options.Password);
+
     private async Task ServeAsync(Client client, CancellationToken token)
     {
         Log($"#{client.Id} connected from {client.Remote}");
+        client.Send(Protocol.Encode(Protocol.Challenge, Protocol.Int(Protocol.Version), client.Nonce, PasswordRequired ? "1" : "0"));
         var writer = Task.Run(() => client.WriteLoopAsync(token), token);
         try
         {
@@ -173,6 +186,19 @@ public sealed class GameServer
                 Disconnect(c, "timeout");
                 c.Close();
             }
+            else if (c.Room == null && !c.Closing && now - c.ConnectedAt > options.HandshakeTimeout)
+            {
+                Disconnect(c, "no handshake");
+                c.Close();
+            }
+        }
+        foreach (IPAddress ip in authFailures.Keys.ToList())
+        {
+            authFailures[ip].RemoveAll(t => now - t > options.AuthFailureWindow);
+            if (authFailures[ip].Count == 0)
+            {
+                authFailures.Remove(ip);
+            }
         }
         foreach (Room room in rooms.Values.ToList())
         {
@@ -251,10 +277,32 @@ public sealed class GameServer
         {
             return;
         }
-        if (f.Length < 5 || !Protocol.TryInt(f[1], out int version) || version != Protocol.Version)
+        if (f.Length < 6 || !Protocol.TryInt(f[1], out int version) || version != Protocol.Version)
         {
             Reject(client, $"Falsche Protokollversion (Server: v{Protocol.Version}). Bitte Mod und Server aktualisieren.");
             return;
+        }
+        if (PasswordRequired)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (authFailures.TryGetValue(client.Address, out List<DateTime>? failures)
+                && failures.Count(t => now - t <= options.AuthFailureWindow) >= options.MaxAuthFailures)
+            {
+                Reject(client, "Zu viele falsche Passwoerter. Bitte spaeter erneut versuchen.");
+                return;
+            }
+            if (!ProofMatches(client.Nonce, f[5]))
+            {
+                if (failures == null)
+                {
+                    failures = new List<DateTime>();
+                    authFailures[client.Address] = failures;
+                }
+                failures.Add(now);
+                Log($"#{client.Id} wrong password from {client.Address}");
+                Reject(client, "Falsches Server-Passwort.");
+                return;
+            }
         }
         string? initials = Protocol.NormalizeInitials(f[2]);
         string? character = Protocol.NormalizeId(f[3]);
@@ -482,6 +530,13 @@ public sealed class GameServer
         }
     }
 
+    private bool ProofMatches(string nonce, string proof)
+    {
+        byte[] expected = Encoding.ASCII.GetBytes(Protocol.AuthProof(options.Password!, nonce));
+        byte[] actual = Encoding.ASCII.GetBytes((proof ?? string.Empty).Trim().ToLowerInvariant());
+        return CryptographicOperations.FixedTimeEquals(expected, actual);
+    }
+
     private void Reject(Client client, string message)
     {
         client.Send(Protocol.Encode(Protocol.Error, message));
@@ -538,8 +593,21 @@ internal sealed class Client
         Tcp.NoDelay = true;
         Stream = tcp.GetStream();
         Remote = tcp.Client.RemoteEndPoint?.ToString() ?? "?";
+        Address = (tcp.Client.RemoteEndPoint as IPEndPoint)?.Address ?? IPAddress.None;
+        if (Address.IsIPv4MappedToIPv6)
+        {
+            Address = Address.MapToIPv4();
+        }
         LastSeen = DateTime.UtcNow;
+        ConnectedAt = LastSeen;
+        Nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
     }
+
+    public IPAddress Address { get; }
+    public DateTime ConnectedAt { get; }
+
+    /// <summary>Random per-connection challenge for the password proof.</summary>
+    public string Nonce { get; }
 
     public int Id { get; }
     public TcpClient Tcp { get; }

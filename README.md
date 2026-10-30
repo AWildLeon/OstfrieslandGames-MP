@@ -59,7 +59,8 @@ cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
 ## Spielen
 
 1. Spiel mit BepInEx starten, im Hauptmenü **F8** drücken.
-2. Server, Port, Raumname, deine drei Initialen und deine Figur eintragen → **Verbinden**.
+2. Server, Port, ggf. Server-Passwort, Raumname, deine drei Initialen und deine Figur
+   eintragen → **Verbinden**.
    Alle Mitspieler nutzen denselben Server und denselben Raumnamen.
 3. Sobald mindestens zwei Spieler im Raum sind, wählt der Host im F8-Fenster eine Disziplin.
 4. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.
@@ -69,7 +70,7 @@ cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
 Unten rechts siehst du während einer Runde alle Spieler mit Status und Punkten.
 
 Einstellungen landen in `BepInEx/config/de.onlh.ostfriesland.multiplayer.cfg`
-(Server, Raum, Initialen, Figur, Taste für das Fenster, Ecke für die Spielerliste).
+(Server, Passwort, Raum, Initialen, Figur, Taste für das Fenster, Ecke für die Spielerliste).
 
 ## Server
 
@@ -85,8 +86,21 @@ dotnet run -c Release --project src/OGMultiplayer.Server -- --port 27420
 
 Optionen: `--port` (Standard 27420), `--bind` (Standard 0.0.0.0),
 `--ready-timeout <s>` (wie lange auf langsame Spieler gewartet wird, Standard 60),
-`--match-timeout <min>` (maximale Rundendauer, Standard 20).
-Port und Bind-Adresse gehen auch per `OGMP_PORT` / `OGMP_BIND`.
+`--match-timeout <min>` (maximale Rundendauer, Standard 20),
+`--password-file <pfad>` (Server-Passwort, erste Zeile der Datei).
+Port, Bind-Adresse und Passwort gehen auch per `OGMP_PORT` / `OGMP_BIND` /
+`OGMP_PASSWORD` bzw. `OGMP_PASSWORD_FILE`.
+
+### Passwort
+
+Ohne Passwort ist der Server offen. Mit Passwort trägt jeder Spieler es im F8-Fenster ein.
+Das Passwort wird **nie im Klartext übertragen**: Der Server schickt pro Verbindung eine
+zufällige Nonce, der Client antwortet mit `HMAC-SHA256(Passwort, Nonce)`. Nach 5 falschen
+Versuchen innerhalb von 5 Minuten wird die IP vorübergehend gesperrt.
+
+Im Spiel steht das Passwort im Klartext in der BepInEx-Konfigurationsdatei. Wer eine
+Verbindung mitschneidet, kann ein schwaches Passwort offline durchprobieren – also ein
+langes, zufälliges Passwort nehmen.
 
 ### NixOS-Modul
 
@@ -104,6 +118,7 @@ Port und Bind-Adresse gehen auch per `OGMP_PORT` / `OGMP_BIND`.
             enable = true;
             port = 27420;
             openFirewall = true;
+            passwordFile = "/run/secrets/ogmultiplayer-password"; # optional, z. B. via agenix/sops-nix
           };
         }
       ];
@@ -112,11 +127,11 @@ Port und Bind-Adresse gehen auch per `OGMP_PORT` / `OGMP_BIND`.
 }
 ```
 
-Der Dienst läuft als `DynamicUser` mit systemd-Härtung.
+Der Dienst läuft als `DynamicUser` mit systemd-Härtung; die Passwortdatei wird per
+`LoadCredential` eingelesen und landet nicht im Nix-Store.
 
-> Das Protokoll ist unverschlüsseltes TCP ohne Konten/Passwörter. Für Spiele über das
-> Internet am besten einen eigenen Server betreiben oder über VPN (z. B. WireGuard,
-> Tailscale) verbinden.
+> Das Passwort schützt den Zugang, verschlüsselt aber nicht die Spieldaten (Initialen,
+> Punkte). Wer mehr will: VPN (z. B. WireGuard, Tailscale).
 
 ## Wie es funktioniert
 

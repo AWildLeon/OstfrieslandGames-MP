@@ -105,6 +105,15 @@
               default = false;
               description = "TCP-Port in der Firewall oeffnen.";
             };
+            passwordFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              example = "/run/secrets/ogmultiplayer-password";
+              description = ''
+                Datei mit dem Server-Passwort (erste Zeile). null = offener Server.
+                Wird per systemd LoadCredential eingelesen und landet nicht im Nix-Store.
+              '';
+            };
             extraArgs = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [ ];
@@ -120,7 +129,12 @@
               after = [ "network-online.target" ];
               wants = [ "network-online.target" ];
               serviceConfig = {
-                ExecStart = lib.escapeShellArgs ([ (lib.getExe cfg.package) "--port" (toString cfg.port) "--bind" cfg.bind ] ++ cfg.extraArgs);
+                ExecStart = lib.escapeShellArgs (
+                  [ (lib.getExe cfg.package) "--port" (toString cfg.port) "--bind" cfg.bind ]
+                  ++ lib.optionals (cfg.passwordFile != null) [ "--password-file" "%d/password" ]
+                  ++ cfg.extraArgs
+                );
+                LoadCredential = lib.mkIf (cfg.passwordFile != null) [ "password:${cfg.passwordFile}" ];
                 DynamicUser = true;
                 Restart = "on-failure";
                 NoNewPrivileges = true;

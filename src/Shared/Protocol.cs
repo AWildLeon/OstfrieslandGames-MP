@@ -11,8 +11,13 @@ namespace OGMultiplayer
     /// Every message is one UTF-8 line, fields separated by TAB.
     /// The first field is the command.
     ///
+    /// Handshake: on connect the server sends CHALLENGE; the client answers with HELLO.
+    /// With a server password, proof = lowercase hex HMAC-SHA256(key: UTF-8 password,
+    /// message: nonce). The password itself never goes over the wire. Without a
+    /// password, proof is empty.
+    ///
     /// Client -> Server
-    ///   HELLO    version initials characterId room
+    ///   HELLO    version initials characterId room proof
     ///   START    discipline                 (host only)
     ///   READY    matchId                    (client is waiting at the turn start)
     ///   LIVE     matchId score              (optional live score while playing)
@@ -22,6 +27,7 @@ namespace OGMultiplayer
     ///   PING
     ///
     /// Server -> Client
+    ///   CHALLENGE version nonce passwordRequired(0|1)
     ///   WELCOME  playerId
     ///   ERROR    message
     ///   LOBBY    room hostId state player*  (player = id|INI|char|status|score)
@@ -48,6 +54,7 @@ namespace OGMultiplayer
         public const string Char = "CHAR";
         public const string Ping = "PING";
 
+        public const string Challenge = "CHALLENGE";
         public const string Welcome = "WELCOME";
         public const string Error = "ERROR";
         public const string Lobby = "LOBBY";
@@ -104,6 +111,21 @@ namespace OGMultiplayer
                 }
             }
             return sb.ToString();
+        }
+
+        /// <summary>Lowercase hex HMAC-SHA256 of the nonce, keyed with the password.</summary>
+        public static string AuthProof(string password, string nonce)
+        {
+            using (var hmac = new System.Security.Cryptography.HMACSHA256(Encoding.UTF8.GetBytes(password ?? string.Empty)))
+            {
+                byte[] hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(nonce ?? string.Empty));
+                var sb = new StringBuilder(hash.Length * 2);
+                foreach (byte b in hash)
+                {
+                    sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+                }
+                return sb.ToString();
+            }
         }
 
         public static string Int(int value)

@@ -112,7 +112,7 @@ namespace OGMultiplayer.Plugin
 
         // ------------------------------------------------------------------ connection
 
-        public void Connect(string host, int port, string room, string initials, string character)
+        public void Connect(string host, int port, string room, string initials, string character, string password)
         {
             Disconnect();
             string ini = Protocol.NormalizeInitials(initials);
@@ -140,10 +140,48 @@ namespace OGMultiplayer.Plugin
             }
             LastError = null;
             Connecting = true;
+            pendingHello = new[] { ini, charId, roomId };
+            pendingPassword = password ?? string.Empty;
             net = new NetClient();
-            net.Connect(host.Trim(), port, Protocol.Encode(Protocol.Hello, Protocol.Int(Protocol.Version), ini, charId, roomId));
+            net.Connect(host.Trim(), port);
             lastPing = Time.unscaledTime;
             Plugin.Log.LogInfo($"Connecting to {host}:{port}, room '{roomId}' as {ini}");
+        }
+
+        private string[] pendingHello;
+        private string pendingPassword;
+
+        /// <summary>Answers the server's CHALLENGE with HELLO and the password proof.</summary>
+        private void HandleChallenge(string[] f)
+        {
+            if (pendingHello == null)
+            {
+                return;
+            }
+            if (!Protocol.TryInt(f.ElementAtOrDefault(1), out int version) || version != Protocol.Version)
+            {
+                FailConnect($"Server nutzt Protokoll v{f.ElementAtOrDefault(1)}, Mod v{Protocol.Version}. Bitte aktualisieren.");
+                return;
+            }
+            string nonce = f.ElementAtOrDefault(2) ?? string.Empty;
+            bool required = f.ElementAtOrDefault(3) == "1";
+            if (required && string.IsNullOrEmpty(pendingPassword))
+            {
+                FailConnect("Der Server verlangt ein Passwort.");
+                return;
+            }
+            string proof = required ? Protocol.AuthProof(pendingPassword, nonce) : string.Empty;
+            Send(Protocol.Hello, Protocol.Int(Protocol.Version), pendingHello[0], pendingHello[1], pendingHello[2], proof);
+            pendingHello = null;
+            pendingPassword = null;
+        }
+
+        private void FailConnect(string message)
+        {
+            LastError = message;
+            net?.Dispose();
+            net = null;
+            ResetConnectionState();
         }
 
         public void Disconnect()
@@ -160,6 +198,8 @@ namespace OGMultiplayer.Plugin
 
         private void ResetConnectionState()
         {
+            pendingHello = null;
+            pendingPassword = null;
             Connected = false;
             Connecting = false;
             MyId = 0;
@@ -299,6 +339,9 @@ namespace OGMultiplayer.Plugin
             }
             switch (f[0])
             {
+                case Protocol.Challenge:
+                    HandleChallenge(f);
+                    break;
                 case Protocol.Welcome:
                     Protocol.TryInt(f.ElementAtOrDefault(1), out int id);
                     MyId = id;

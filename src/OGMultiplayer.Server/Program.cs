@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,6 +11,20 @@ var options = new ServerOptions();
 
 string? envPort = Environment.GetEnvironmentVariable("OGMP_PORT");
 string? envBind = Environment.GetEnvironmentVariable("OGMP_BIND");
+string? envPassword = Environment.GetEnvironmentVariable("OGMP_PASSWORD");
+string? envPasswordFile = Environment.GetEnvironmentVariable("OGMP_PASSWORD_FILE");
+if (!string.IsNullOrEmpty(envPassword))
+{
+    options.Password = envPassword;
+}
+if (!string.IsNullOrEmpty(envPasswordFile))
+{
+    options.Password = ReadPasswordFile(envPasswordFile);
+    if (options.Password == null)
+    {
+        return 2;
+    }
+}
 if (envPort != null && Protocol.TryInt(envPort, out int p))
 {
     options.Port = p;
@@ -58,6 +74,18 @@ for (int i = 0; i < args.Length; i++)
             options.MatchTimeout = TimeSpan.FromMinutes(mt);
             i++;
             break;
+        case "--password-file":
+            if (next == null)
+            {
+                return Fail("--password-file braucht einen Pfad");
+            }
+            options.Password = ReadPasswordFile(next);
+            if (options.Password == null)
+            {
+                return 2;
+            }
+            i++;
+            break;
         case "-h":
         case "--help":
             Console.WriteLine("""
@@ -68,6 +96,8 @@ for (int i = 0; i < args.Length; i++)
                   -b, --bind <ip>            Bind-Adresse (Standard 0.0.0.0, Env OGMP_BIND)
                       --ready-timeout <s>    Max. Wartezeit auf alle Spieler vor dem Start (Standard 60)
                       --match-timeout <min>  Max. Dauer einer Runde (Standard 20)
+                      --password-file <pfad> Server-Passwort aus Datei (erste Zeile; Env OGMP_PASSWORD_FILE)
+                                             Alternativ Env OGMP_PASSWORD. Ohne Passwort ist der Server offen.
                 """);
             return 0;
         default:
@@ -85,6 +115,25 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
 
 await new GameServer(options).RunAsync(cts.Token);
 return 0;
+
+static string? ReadPasswordFile(string path)
+{
+    try
+    {
+        string password = (File.ReadAllLines(path).FirstOrDefault() ?? string.Empty).Trim();
+        if (password.Length == 0)
+        {
+            Console.Error.WriteLine($"Passwortdatei '{path}' ist leer");
+            return null;
+        }
+        return password;
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        Console.Error.WriteLine($"Passwortdatei '{path}' nicht lesbar: {ex.Message}");
+        return null;
+    }
+}
 
 static int Fail(string message)
 {
