@@ -65,16 +65,18 @@ cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
 
 1. Spiel mit BepInEx starten, im Hauptmenü **Mehrspieler → Online** wählen (Abkürzung: **F8**).
    *An einem Gerät* ist der normale Hot-Seat-Modus des Spiels.
-2. Server, ggf. Passwort, Raum, Initialen und Figur einstellen → **Verbinden**.
+2. Es öffnet sich die **Figurenauswahl des Spiels** (Ostfriesland-Karte, Initialen-Kästchen) –
+   genau wie beim Mehrspieler an einem Gerät, nur für dich allein. Figur wählen, Initialen
+   eingeben, bestätigen. Später änderbar über die Zeile *Spieler* (öffnet wieder die Auswahl).
+3. Auf der Online-Seite Server, ggf. Passwort und Raum einstellen → **Verbinden**.
    Bedienung wie in den Spielmenüs: Hoch/Runter wählen, Bestätigen öffnet ein Feld zum Tippen
-   (Enter übernimmt, Esc bricht ab), Links/Rechts ändert Figur & Co. Initialen gehen auch
-   arcade-mäßig mit Hoch/Runter pro Buchstabe. Maus funktioniert ebenfalls.
+   (Enter übernimmt, Esc bricht ab), Links/Rechts ändert Werte; Maus geht auch.
    Alle Mitspieler nutzen denselben Server und denselben Raumnamen.
    Rechts steht deine gewählte Figur mit einem ihrer Sprüche aus der Figurenauswahl des Spiels.
-3. Sobald mindestens zwei Spieler (oder Bots) im Raum sind, wählt der Host die Disziplin
+4. Sobald mindestens zwei Spieler (oder Bots) im Raum sind, wählt der Host die Disziplin
    und startet die Runde.
-4. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.
-5. Nach deinem Lauf wartest du auf die anderen, danach kommt der gemeinsame Ergebnisbildschirm.
+5. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.
+6. Nach deinem Lauf wartest du auf die anderen, danach kommt der gemeinsame Ergebnisbildschirm.
    Dort startet der Host per Revanche-Taste (Leertaste) die nächste Runde oder wählt eine andere Disziplin.
 
 Unten rechts siehst du während einer Runde alle Spieler mit Status und Punkten.
@@ -86,7 +88,8 @@ Unten rechts siehst du während einer Runde alle Spieler mit Status und Punkten.
   letzten Menschen fertig. Ihre Punkte orientieren sich am Median der echten Ergebnisse auf
   dem Server (anfangs an den Startwerten der Spiel-Bestenliste, 600–1500): *leicht* ≈ 55 %,
   *mittel* ≈ 88 %, *schwer* ≈ 120 %, jeweils mit Streuung.
-- **Gegen Bots (offline):** Mehrspieler → *Gegen Bots*. Kein Server, kein Netzwerk; ein
+- **Gegen Bots (offline):** Mehrspieler → *Gegen Bots* (Figurenauswahl wie oben, dann Lobby
+  mit einem Bot). Kein Server, kein Netzwerk; ein
   kleiner lokaler Ersatz-Server im Mod übernimmt. Bots richten sich nach deiner eigenen
   lokalen Bestenliste der Disziplin.
 

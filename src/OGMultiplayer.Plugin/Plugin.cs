@@ -41,7 +41,7 @@ namespace OGMultiplayer.Plugin
             BlockScoreApi = Config.Bind("Privacy", "BlockScoreApiWhileOnline", true, "Keine Verbindungen zur Online-Bestenliste des Spiels, solange der Online-Modus verbunden ist. Online-Runden landen nie in der weltweiten Bestenliste.");
             HudPosition = Config.Bind("UI", "HudPosition", HudCorner.BottomRight, "Ecke fuer die Spielerliste waehrend einer Online-Runde.");
 
-            foreach (string missing in GameBridge.MissingMembers())
+            foreach (string missing in System.Linq.Enumerable.Concat(GameBridge.MissingMembers(), OnlineSetup.MissingMembers()))
             {
                 Log.LogError($"Spielversion passt nicht zum Mod: {missing} fehlt. Online-Modus ist evtl. defekt.");
             }

@@ -85,6 +85,9 @@ namespace OGMultiplayer.Plugin
                     if (f.Length >= 5 && Human == null)
                     {
                         members.Add(new Member { Id = HumanId, Initials = f[2], Character = f[3] });
+                        // start with one opponent so a round can begin right away
+                        HandleBot(new[] { Protocol.Bot, Protocol.BotAdd });
+                        outgoing.Clear();
                         Reply(Protocol.Welcome, Protocol.Int(HumanId));
                         Lobby();
                     }

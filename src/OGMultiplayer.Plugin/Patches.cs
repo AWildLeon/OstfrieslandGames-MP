@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using HarmonyLib;
 using OstfrieslandGames.Padstockspringen;
 using UnityEngine;
@@ -165,6 +166,50 @@ namespace OGMultiplayer.Plugin
         }
     }
 
+    /// <summary>Lets the game's own hot seat registration pick the online player (see OnlineSetup).</summary>
+    [HarmonyPatch]
+    internal static class OnlineSetupPatches
+    {
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(HotSeatCharacterSetup), nameof(HotSeatCharacterSetup.Initialize))]
+        private static void InitializePostfix(HotSeatCharacterSetup __instance, HotSeatFlowController flow)
+        {
+            if (OnlineSetup.IsSetupController(flow))
+            {
+                OnlineSetup.OnRegistrationShown(__instance);
+            }
+        }
+
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(HotSeatCharacterSetup), nameof(HotSeatCharacterSetup.Back))]
+        private static void BackPostfix(HotSeatCharacterSetup __instance)
+        {
+            if (OnlineSetup.IsSetupController(HotSeatFlowController.Instance) && OnlineSetup.WantsToLeave(__instance))
+            {
+                OnlineSetup.Cancel();
+            }
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(HotSeatFlowController), nameof(HotSeatFlowController.ConfigurePlayers))]
+        private static bool ConfigurePlayersPrefix(HotSeatFlowController __instance, List<HotSeatPlayer> players)
+        {
+            if (!OnlineSetup.IsSetupController(__instance))
+            {
+                return true;
+            }
+            if (players != null && players.Count > 0)
+            {
+                OnlineSetup.Complete(players[0]);
+            }
+            else
+            {
+                OnlineSetup.Cancel();
+            }
+            return false;
+        }
+    }
+
     /// <summary>Hooks the online pages into the start screen menu.</summary>
     [HarmonyPatch(typeof(StartScreenMenuController))]
     internal static class StartScreenPatches
@@ -187,11 +232,14 @@ namespace OGMultiplayer.Plugin
         [HarmonyPatch("Update")]
         private static bool UpdatePrefix(StartScreenMenuController __instance)
         {
-            if (!OnlineMenu.Visible && Time.unscaledTime >= OnlineMenu.MenuInputBlockedUntil)
+            // also while returning from the game's registration, so the main menu (and its
+            // one-time notices) does not flash up before the online page takes over
+            bool covered = OnlineMenu.Visible || OnlineSetup.Finished != OnlineSetup.Purpose.None;
+            if (!covered && Time.unscaledTime >= OnlineMenu.MenuInputBlockedUntil)
             {
                 return true;
             }
-            if (OnlineMenu.Visible && __instance.canvasGroup != null)
+            if (covered && __instance.canvasGroup != null)
             {
                 __instance.canvasGroup.alpha = 0f;
                 __instance.canvasGroup.interactable = false;

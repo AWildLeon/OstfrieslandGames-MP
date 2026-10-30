@@ -29,8 +29,7 @@ namespace OGMultiplayer.Plugin
             None,
             Server,
             Password,
-            Room,
-            Initials
+            Room
         }
 
         private sealed class Row
@@ -97,7 +96,6 @@ namespace OGMultiplayer.Plugin
         // inline text editing
         private Field editing = Field.None;
         private string editBuffer = string.Empty;
-        private int initialsCursor;
 
         private static Sprite balloonSprite;
         private static Sprite tailSprite;
@@ -117,9 +115,17 @@ namespace OGMultiplayer.Plugin
         /// <summary>One game pixel in canvas units (the game renders 216 pixels high, the canvas is 800).</summary>
         private const float GamePixel = 800f / 216f;
 
+        private float sceneLoadedAt;
+
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            sceneLoadedAt = Time.unscaledTime;
+        }
+
         private void Awake()
         {
             Instance = this;
+            SceneManager.sceneLoaded += OnSceneLoaded;
             host = Plugin.ServerHost.Value;
             port = Plugin.ServerPort.Value.ToString();
             password = Plugin.ServerPassword.Value;
@@ -130,6 +136,7 @@ namespace OGMultiplayer.Plugin
 
         private void OnDestroy()
         {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
             if (Instance == this)
             {
                 Instance = null;
@@ -331,7 +338,7 @@ namespace OGMultiplayer.Plugin
                     OnlineSession.RunAuthorized(menu.OpenMultiplayer);
                 }
             });
-            AddRow("Online", () => "ONLINE", new Vector2(0f, y - 76f), () => Show((Session.Connected || Session.Connecting) && !Session.IsOffline ? Page.Lobby : Page.Connect, 0));
+            AddRow("Online", () => "ONLINE", new Vector2(0f, y - 76f), OpenOnline);
             AddRow("Bots", () => "GEGEN BOTS", new Vector2(0f, y - 152f), StartBots);
             AddRow("Back", () => "ZURUECK", new Vector2(0f, y - 228f), Hide);
             PageFooter("ONLINE UND GEGEN BOTS: JEDER SPIELT AUF SEINEM EIGENEN GERAET, ALLE GLEICHZEITIG.");
@@ -346,22 +353,78 @@ namespace OGMultiplayer.Plugin
             AddRow("Password", () => "PASSWORT: " + (editing == Field.Password ? Mask(editBuffer) + Cursor() : string.IsNullOrEmpty(password) ? "KEINS" : Mask(password)),
                 new Vector2(0f, y - step), () => BeginEdit(Field.Password), edit: Field.Password);
             AddRow("Room", () => "RAUM: " + Shown(Field.Room, room).ToUpperInvariant(), new Vector2(0f, y - 2 * step), () => BeginEdit(Field.Room), edit: Field.Room);
-            AddRow("Initials", () => "INITIALEN: " + (editing == Field.Initials ? InitialsEditText() : string.IsNullOrEmpty(initials) ? "---" : initials),
-                new Vector2(0f, y - 3 * step), () => BeginEdit(Field.Initials), edit: Field.Initials);
-            AddCharacterRow(new Vector2(0f, y - 4 * step));
-            AddRow("Connect", () => Session.Connecting ? "VERBINDE ..." : "VERBINDEN", new Vector2(0f, y - 5 * step), Connect);
-            AddRow("Back", () => "ZURUECK", new Vector2(0f, y - 6 * step), () => Show(Page.Choice, 1));
+            AddPlayerRow(new Vector2(0f, y - 3 * step), OnlineSetup.Purpose.Online);
+            AddRow("Connect", () => Session.Connecting ? "VERBINDE ..." : "VERBINDEN", new Vector2(0f, y - 4 * step), Connect);
+            AddRow("Back", () => "ZURUECK", new Vector2(0f, y - 5 * step), () => Show(Page.Choice, 1));
             PageFooter(string.Empty);
+        }
+
+        private void OpenOnline()
+        {
+            if ((Session.Connected || Session.Connecting) && !Session.IsOffline)
+            {
+                Show(Page.Lobby, 0);
+            }
+            else
+            {
+                BeginSetup(OnlineSetup.Purpose.Online);
+            }
         }
 
         private void StartBots()
         {
-            if (!(Session.IsOffline && Session.Connected))
+            if (Session.IsOffline && Session.Connected)
             {
-                SaveSettings();
-                Session.StartOffline(initials, characters.Count > 0 ? characters[characterIndex].id : SelectedCharacter.DefaultId);
+                Show(Page.Lobby, 0);
             }
-            Show(Page.Lobby, 0);
+            else
+            {
+                BeginSetup(OnlineSetup.Purpose.Bots);
+            }
+        }
+
+        /// <summary>Hands over to the game's own character registration (map, quote, initials).</summary>
+        private void BeginSetup(OnlineSetup.Purpose purpose)
+        {
+            SaveSettings();
+            Hide();
+            OnlineSetup.Begin(purpose);
+        }
+
+        /// <summary>Continues after the game's registration returned to the start screen.</summary>
+        private void ResumeAfterSetup(OnlineSetup.Purpose finished)
+        {
+            initials = Plugin.Initials.Value;
+            LoadCharacters();
+            switch (finished)
+            {
+                case OnlineSetup.Purpose.Online:
+                    Show(Page.Connect, 4);
+                    break;
+                case OnlineSetup.Purpose.Bots:
+                    Session.StartOffline(initials, Plugin.Character.Value);
+                    Show(Page.Lobby, 0);
+                    break;
+                case OnlineSetup.Purpose.ChangeInLobby:
+                    if (Session.Connected)
+                    {
+                        Session.ChangeCharacter(Plugin.Character.Value);
+                        LobbyPlayer me = Session.Lobby.FirstOrDefault(p => p.Id == Session.MyId);
+                        if (me != null && me.Initials != initials)
+                        {
+                            Session.Toast("Neue Initialen gelten ab der naechsten Verbindung.", 5f);
+                        }
+                        Show(Page.Lobby, 0);
+                    }
+                    else
+                    {
+                        Show(Page.Choice, 0);
+                    }
+                    break;
+                default:
+                    Show(Page.Choice, OnlineSetup.Last == OnlineSetup.Purpose.Bots ? 2 : 1);
+                    break;
+            }
         }
 
         private void RenderLobby()
@@ -406,7 +469,7 @@ namespace OGMultiplayer.Plugin
             }
             if (!inMatch)
             {
-                AddCharacterRow(new Vector2(0f, c - step * n++));
+                AddPlayerRow(new Vector2(0f, c - step * n++), OnlineSetup.Purpose.ChangeInLobby);
             }
             bool offline = Session.IsOffline;
             AddRow("Disconnect", () => offline ? "BEENDEN" : "TRENNEN", new Vector2(0f, c - step * n++), () =>
@@ -418,23 +481,9 @@ namespace OGMultiplayer.Plugin
             PageFooter(string.Empty);
         }
 
-        private void AddCharacterRow(Vector2 position)
+        private void AddPlayerRow(Vector2 position, OnlineSetup.Purpose purpose)
         {
-            AddRow("Character", () => "FIGUR: " + CharacterName(), position, () => ChangeCharacter(1), horizontal: ChangeCharacter);
-        }
-
-        private void ChangeCharacter(int direction)
-        {
-            if (characters.Count == 0)
-            {
-                return;
-            }
-            characterIndex = (characterIndex + characters.Count + direction) % characters.Count;
-            Plugin.Character.Value = characters[characterIndex].id;
-            if (Session.Connected)
-            {
-                Session.ChangeCharacter(characters[characterIndex].id);
-            }
+            AddRow("Player", () => "SPIELER: " + (Protocol.NormalizeInitials(initials) ?? "---") + " - " + CharacterName(), position, () => BeginSetup(purpose));
         }
 
         private string CharacterName()
@@ -740,22 +789,9 @@ namespace OGMultiplayer.Plugin
             return new string('*', Math.Min(16, value?.Length ?? 0));
         }
 
-        private string InitialsEditText()
-        {
-            var sb = new StringBuilder();
-            for (int i = 0; i < 3; i++)
-            {
-                char ch = i < editBuffer.Length ? editBuffer[i] : 'A';
-                sb.Append(i == initialsCursor && Mathf.Repeat(Time.unscaledTime, 0.8f) < 0.4f ? '_' : ch);
-            }
-            return sb.ToString();
-        }
-
         private string EditHint()
         {
-            return editing == Field.Initials
-                ? "HOCH/RUNTER: BUCHSTABE  LINKS/RECHTS: STELLE  BESTAETIGEN: OK"
-                : "TIPPEN, ENTER: OK, ESC: ABBRECHEN";
+            return "TIPPEN, ENTER: OK, ESC: ABBRECHEN";
         }
 
         private void BeginEdit(Field field)
@@ -771,11 +807,6 @@ namespace OGMultiplayer.Plugin
                     break;
                 case Field.Room:
                     editBuffer = room ?? string.Empty;
-                    break;
-                case Field.Initials:
-                    string current = Protocol.NormalizeInitials(initials) ?? "AAA";
-                    editBuffer = current;
-                    initialsCursor = 0;
                     break;
             }
             Input.ResetInputAxes();
@@ -804,9 +835,6 @@ namespace OGMultiplayer.Plugin
                 case Field.Room:
                     room = editBuffer.Trim().ToLowerInvariant();
                     break;
-                case Field.Initials:
-                    initials = editBuffer;
-                    break;
             }
             editing = Field.None;
             SaveSettings();
@@ -819,11 +847,6 @@ namespace OGMultiplayer.Plugin
             {
                 editing = Field.None;
                 SoundManager.Play(SoundEvent.MenuBack);
-                return;
-            }
-            if (editing == Field.Initials)
-            {
-                UpdateInitialsEdit();
                 return;
             }
             foreach (char c in Input.inputString)
@@ -846,42 +869,6 @@ namespace OGMultiplayer.Plugin
                 }
             }
             if (Input.GetKeyDown(KeyCode.KeypadEnter))
-            {
-                CommitEdit();
-            }
-        }
-
-        private void UpdateInitialsEdit()
-        {
-            char[] chars = editBuffer.PadRight(3, 'A').Substring(0, 3).ToCharArray();
-            int vertical = ArcadeInput.MenuVerticalStep();
-            int horizontal = ArcadeInput.MenuHorizontalStep();
-            if (vertical != 0)
-            {
-                // up = next letter like the game's own initials entry
-                chars[initialsCursor] = (char)('A' + ((chars[initialsCursor] - 'A' - vertical + 26) % 26));
-                SoundManager.Play(SoundEvent.MenuMove);
-            }
-            if (horizontal != 0)
-            {
-                initialsCursor = Mathf.Clamp(initialsCursor + horizontal, 0, 2);
-                SoundManager.Play(SoundEvent.MenuMove);
-            }
-            foreach (char c in Input.inputString.ToUpperInvariant())
-            {
-                if (c >= 'A' && c <= 'Z')
-                {
-                    chars[initialsCursor] = c;
-                    initialsCursor = Math.Min(2, initialsCursor + 1);
-                }
-                else if (c == '\b')
-                {
-                    initialsCursor = Math.Max(0, initialsCursor - 1);
-                }
-            }
-            editBuffer = new string(chars);
-            bool confirm = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || (ArcadeInput.SubmitDown() && !Input.GetKeyDown(KeyCode.Space));
-            if (confirm)
             {
                 CommitEdit();
             }
@@ -912,6 +899,15 @@ namespace OGMultiplayer.Plugin
 
         private void Update()
         {
+            if (!visible && OnlineSetup.Finished != OnlineSetup.Purpose.None && Session != null && !HotSeatFlowController.IsActive
+                && SceneManager.GetActiveScene().name == "StartScreen" && Time.unscaledTime - sceneLoadedAt > 0.6f
+                && FindAnyObjectByType<StartScreenMenuController>() != null)
+            {
+                OnlineSetup.Purpose finished = OnlineSetup.Finished;
+                OnlineSetup.Finished = OnlineSetup.Purpose.None;
+                ResumeAfterSetup(finished);
+                return;
+            }
             if (!visible)
             {
                 StartScreenPlattNotice notice = FindAnyObjectByType<StartScreenPlattNotice>();
