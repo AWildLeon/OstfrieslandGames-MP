@@ -128,6 +128,7 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
+Console.WriteLine("OGMultiplayer.Server - inoffizieller Fan-Server, keine Verbindung zu den Entwicklern von Ostfriesland Games.");
 var server = new GameServer(options);
 Task run = server.RunAsync(CancellationToken.None);
 try

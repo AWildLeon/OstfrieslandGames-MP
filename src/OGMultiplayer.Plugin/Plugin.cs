@@ -55,6 +55,7 @@ namespace OGMultiplayer.Plugin
             host.AddComponent<OnlineSession>();
             host.AddComponent<OnlineMenu>();
             host.AddComponent<OnlineHud>();
+            Log.LogInfo("Inoffizieller Fan-Mod, keine Verbindung zu den Entwicklern von Ostfriesland Games. Fehler bitte nicht an deren Support melden.");
             Log.LogInfo($"{Name} {Version} geladen (Protokoll v{OGMultiplayer.Protocol.Version}). Hauptmenue > MEHRSPIELER oder {ToggleKey.Value} oeffnet den Online-Modus.");
         }
 

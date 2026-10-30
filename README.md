@@ -1,5 +1,10 @@
 # Ostfriesland Games – Online-Mehrspieler
 
+> **Inoffizieller Fan-Mod.** Dieses Projekt steht in keiner Verbindung zu den Entwicklern oder
+> Rechteinhabern von *Ostfriesland Games* und wird von ihnen weder unterstützt noch geprüft.
+> Fehler im Online-Modus bitte hier melden, nicht beim Spiel-Support. Nutzung auf eigene Gefahr;
+> ein Spiel-Update kann den Mod jederzeit unbrauchbar machen.
+
 Ein [BepInEx](https://github.com/BepInEx/BepInEx)-Mod plus kleiner Server, der den
 lokalen Hot-Seat-Modus von *Ostfriesland Games* ins Netz bringt.
 

@@ -343,7 +343,7 @@ namespace OGMultiplayer.Plugin
             AddRow("Online", () => "ONLINE", new Vector2(0f, y - 76f), OpenOnline);
             AddRow("Bots", () => "GEGEN BOTS", new Vector2(0f, y - 152f), StartBots);
             AddRow("Back", () => "ZURUECK", new Vector2(0f, y - 228f), Hide);
-            PageFooter("ONLINE UND GEGEN BOTS: JEDER SPIELT AUF SEINEM EIGENEN GERAET, ALLE GLEICHZEITIG.");
+            PageFooter("ONLINE UND GEGEN BOTS: INOFFIZIELLER FAN-MOD, NICHT VON DEN ENTWICKLERN DES SPIELS.");
         }
 
         private void RenderConnect()
