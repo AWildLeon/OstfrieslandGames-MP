@@ -11,3 +11,5 @@ OG_Data/
 OG.x86_64
 BepInEx/
 *.tar.zst
+ogmultiplayer-state.json
+*.json.tmp

@@ -88,7 +88,7 @@ public sealed class TestClient : IDisposable
 
 public sealed class ServerFixture : IAsyncDisposable
 {
-    public ServerFixture(string? password = null)
+    public ServerFixture(string? password = null, string? stateFile = null)
     {
         Server = new GameServer(new ServerOptions
         {
@@ -96,10 +96,11 @@ public sealed class ServerFixture : IAsyncDisposable
             Port = 0,
             Password = password,
             Console = false,
+            StateFile = stateFile,
             ReadyTimeout = TimeSpan.FromSeconds(30),
         });
         Run = Server.RunAsync(CancellationToken.None);
-        Server.Started.Wait(TimeSpan.FromSeconds(5));
+        Task.WhenAny(Server.Started, Run).Wait(TimeSpan.FromSeconds(5));
     }
 
     public GameServer Server { get; }
@@ -306,5 +307,96 @@ public class ServerTests
         Assert.Contains("Wartung", a.Next(Protocol.Msg)[1]);
         Assert.Equal("Wartung", a.Next(Protocol.Bye)[1]);
         await fx.Run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+}
+
+public class StateTests : IDisposable
+{
+    private readonly string dir = Directory.CreateTempSubdirectory("ogmp-state-").FullName;
+
+    private string StateFile => Path.Combine(dir, "state.json");
+
+    public void Dispose() => Directory.Delete(dir, recursive: true);
+
+    [Fact]
+    public async Task BansSurviveRestart()
+    {
+        await using (var fx = new ServerFixture(stateFile: StateFile))
+        {
+            using var a = fx.Connect();
+            a.Hello("AAA");
+            Assert.Contains("gesperrt", fx.Server.ExecuteAdmin($"ban {a.Id} cheater"));
+            fx.Server.ExecuteAdmin("ban 203.0.113.7");
+        }
+        Assert.True(File.Exists(StateFile));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(StateFile));
+        }
+
+        await using (var fx = new ServerFixture(stateFile: StateFile))
+        {
+            string bans = fx.Server.ExecuteAdmin("bans");
+            Assert.Contains("127.0.0.1", bans);
+            Assert.Contains("AAA", bans);
+            Assert.Contains("cheater", bans);
+            Assert.Contains("203.0.113.7", bans);
+            Assert.True(IsRefused(fx), "gesperrte IP darf nicht verbinden");
+            fx.Server.ExecuteAdmin("unban 127.0.0.1");
+        }
+
+        await using (var fx = new ServerFixture(stateFile: StateFile))
+        {
+            using var b = fx.Connect();
+            Assert.Equal(Protocol.Welcome, b.Hello("BBB")[0]);
+            Assert.DoesNotContain("127.0.0.1", fx.Server.ExecuteAdmin("bans"));
+        }
+    }
+
+    private static bool IsRefused(ServerFixture fx)
+    {
+        try
+        {
+            using var c = fx.Connect();
+            return c.Challenge[0] == "EOF";
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+    }
+
+    [Fact]
+    public async Task PasswordChangesSurviveRestart()
+    {
+        await using (var fx = new ServerFixture(password: "konfig", stateFile: StateFile))
+        {
+            fx.Server.ExecuteAdmin("password admin");
+        }
+        await using (var fx = new ServerFixture(password: "konfig", stateFile: StateFile))
+        {
+            using var c = fx.Connect();
+            Assert.Equal(Protocol.Welcome, c.Hello("CCC", password: "admin")[0]);
+            fx.Server.ExecuteAdmin("password off");
+        }
+        await using (var fx = new ServerFixture(password: "konfig", stateFile: StateFile))
+        {
+            using var c = fx.Connect();
+            Assert.Equal("0", c.Challenge[3]);
+            fx.Server.ExecuteAdmin("password reset");
+        }
+        await using (var fx = new ServerFixture(password: "konfig", stateFile: StateFile))
+        {
+            using var c = fx.Connect();
+            Assert.Equal(Protocol.Welcome, c.Hello("CCC", password: "konfig")[0]);
+        }
+    }
+
+    [Fact]
+    public async Task BrokenStateFileStopsStartup()
+    {
+        File.WriteAllText(StateFile, "{ kaputt");
+        var fx = new ServerFixture(stateFile: StateFile);
+        await Assert.ThrowsAsync<InvalidDataException>(() => fx.Run);
     }
 }

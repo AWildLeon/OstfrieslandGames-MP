@@ -13,6 +13,8 @@ string? envPort = Environment.GetEnvironmentVariable("OGMP_PORT");
 string? envBind = Environment.GetEnvironmentVariable("OGMP_BIND");
 string? envPassword = Environment.GetEnvironmentVariable("OGMP_PASSWORD");
 string? envPasswordFile = Environment.GetEnvironmentVariable("OGMP_PASSWORD_FILE");
+string? envState = Environment.GetEnvironmentVariable("OGMP_STATE_FILE");
+options.StateFile = string.IsNullOrEmpty(envState) ? "ogmultiplayer-state.json" : envState;
 if (!string.IsNullOrEmpty(envPassword))
 {
     options.Password = envPassword;
@@ -86,6 +88,17 @@ for (int i = 0; i < args.Length; i++)
             }
             i++;
             break;
+        case "--state-file":
+            if (next == null)
+            {
+                return Fail("--state-file braucht einen Pfad");
+            }
+            options.StateFile = next;
+            i++;
+            break;
+        case "--no-state":
+            options.StateFile = null;
+            break;
         case "--no-console":
             options.Console = false;
             break;
@@ -101,6 +114,9 @@ for (int i = 0; i < args.Length; i++)
                       --match-timeout <min>  Max. Dauer einer Runde (Standard 20)
                       --password-file <pfad> Server-Passwort aus Datei (erste Zeile; Env OGMP_PASSWORD_FILE)
                                              Alternativ Env OGMP_PASSWORD. Ohne Passwort ist der Server offen.
+                      --state-file <pfad>    Bans und Admin-Passwort dauerhaft speichern
+                                             (Standard ./ogmultiplayer-state.json, Env OGMP_STATE_FILE)
+                      --no-state             nichts speichern
                       --no-console           keine Admin-Befehle von stdin lesen
 
                 Admin-Befehle (stdin, 'help' fuer alle): status, players, rooms, say, kick, ban,
@@ -114,6 +130,18 @@ for (int i = 0; i < args.Length; i++)
 
 var server = new GameServer(options);
 Task run = server.RunAsync(CancellationToken.None);
+try
+{
+    // a broken state file or a busy port ends RunAsync before it listens
+    if (await Task.WhenAny(server.Started, run) == run)
+    {
+        await run;
+    }
+}
+catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or System.Net.Sockets.SocketException)
+{
+    return Fail(ex.Message);
+}
 Console.CancelKeyPress += (_, e) =>
 {
     e.Cancel = true;

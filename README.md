@@ -103,7 +103,8 @@ Optionen: `--port` (Standard 27420), `--bind` (Standard 0.0.0.0),
 `--ready-timeout <s>` (wie lange auf langsame Spieler gewartet wird, Standard 60),
 `--match-timeout <min>` (maximale Rundendauer, Standard 20),
 `--password-file <pfad>` (Server-Passwort, erste Zeile der Datei),
-`--no-console` (keine Admin-Befehle von stdin).
+`--state-file <pfad>` (Bans und Admin-Passwort, Standard `./ogmultiplayer-state.json`),
+`--no-state` (nichts speichern), `--no-console` (keine Admin-Befehle von stdin).
 Port, Bind-Adresse und Passwort gehen auch per `OGMP_PORT` / `OGMP_BIND` /
 `OGMP_PASSWORD` bzw. `OGMP_PASSWORD_FILE`.
 
@@ -120,11 +121,16 @@ Der Server liest Befehle von seiner Standardeingabe – einfach ins Terminal tip
 | `rooms` | Räume mit Host und laufender Runde |
 | `say <text>` / `sayroom <raum> <text>` | Nachricht, erscheint im Spiel |
 | `kick <id> [grund]` | Spieler trennen |
-| `ban <id\|ip> [grund]` / `unban <ip>` / `bans` | IP sperren (bis zum Neustart) |
+| `ban <id\|ip> [grund]` / `unban <ip>` / `bans` | IP dauerhaft sperren / entsperren / auflisten |
 | `endmatch <raum>` | laufende Runde beenden, Unfertige bekommen 0 |
 | `closeroom <raum> [grund]` | alle Spieler eines Raums trennen |
-| `password <neu\|off>` | Passwort ändern/abschalten (bis zum Neustart) |
+| `password <neu\|off\|reset>` | Passwort dauerhaft ändern/abschalten; `reset` = wieder das aus `--password-file` |
 | `shutdown [sekunden] [grund]` / `shutdown cancel` | Server beenden, optional mit Countdown im Spiel |
+
+Bans und Passwort-Änderungen landen in der State-Datei (JSON, nur für den Besitzer lesbar,
+atomar geschrieben) und überleben Neustarts. Ist die Datei kaputt, startet der Server nicht,
+statt still alle Bans zu vergessen. Achtung: Ein per `password` gesetztes Passwort steht
+im Klartext darin.
 
 Getrennte/gekickte Spieler sehen den Grund im F8-Fenster. Strg+C und `SIGTERM`
 (z. B. `systemctl stop`) beenden ebenfalls sauber und verabschieden alle Spieler.
@@ -165,7 +171,8 @@ langes, zufälliges Passwort nehmen.
 }
 ```
 
-Der Dienst läuft als `DynamicUser` mit systemd-Härtung; die Passwortdatei wird per
+Der Dienst läuft als `DynamicUser` mit systemd-Härtung; Bans liegen in
+`/var/lib/ogmultiplayer/state.json`. Die Passwortdatei wird per
 `LoadCredential` eingelesen und landet nicht im Nix-Store.
 
 > Das Passwort schützt den Zugang, verschlüsselt aber nicht die Spieldaten (Initialen,

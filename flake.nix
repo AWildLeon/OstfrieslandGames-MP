@@ -130,12 +130,16 @@
               wants = [ "network-online.target" ];
               serviceConfig = {
                 ExecStart = lib.escapeShellArgs (
-                  [ (lib.getExe cfg.package) "--port" (toString cfg.port) "--bind" cfg.bind ]
+                  [ (lib.getExe cfg.package) "--port" (toString cfg.port) "--bind" cfg.bind
+                    "--state-file" "/var/lib/ogmultiplayer/state.json" "--no-console" ]
                   ++ lib.optionals (cfg.passwordFile != null) [ "--password-file" "%d/password" ]
                   ++ cfg.extraArgs
                 );
                 LoadCredential = lib.mkIf (cfg.passwordFile != null) [ "password:${cfg.passwordFile}" ];
                 DynamicUser = true;
+                # bans and admin password changes (state.json)
+                StateDirectory = "ogmultiplayer";
+                StateDirectoryMode = "0700";
                 Restart = "on-failure";
                 NoNewPrivileges = true;
                 ProtectSystem = "strict";

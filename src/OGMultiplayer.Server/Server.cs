@@ -28,6 +28,9 @@ public sealed class ServerOptions
     public int MaxAuthFailures { get; set; } = 5;
     public TimeSpan AuthFailureWindow { get; set; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>JSON file for bans and admin password changes; null = nothing persists.</summary>
+    public string? StateFile { get; set; }
+
     /// <summary>Read admin commands from stdin.</summary>
     public bool Console { get; set; } = true;
 }
@@ -39,7 +42,8 @@ public sealed partial class GameServer
     private readonly Dictionary<string, Room> rooms = new(StringComparer.Ordinal);
     private readonly List<Client> clients = new();
     private readonly Dictionary<IPAddress, List<DateTime>> authFailures = new();
-    private readonly HashSet<IPAddress> bans = new();
+    private Dictionary<IPAddress, BanEntry> bans = new();
+    private ServerState state = new();
     private readonly DateTime startedAt = DateTime.UtcNow;
     private CancellationTokenSource shutdown = new();
     private int nextClientId;
@@ -62,6 +66,7 @@ public sealed partial class GameServer
     {
         shutdown = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
         CancellationToken token = shutdown.Token;
+        LoadState();
         var listener = new TcpListener(options.Bind, options.Port);
         listener.Start();
         BoundPort = ((IPEndPoint)listener.LocalEndpoint).Port;
@@ -90,7 +95,7 @@ public sealed partial class GameServer
             lock (sync)
             {
                 IPAddress? ip = (tcp.Client.RemoteEndPoint as IPEndPoint)?.Address;
-                if (ip != null && bans.Contains(ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip))
+                if (ip != null && bans.ContainsKey(ServerState.Normalize(ip)))
                 {
                     tcp.Close();
                     continue;
@@ -117,7 +122,33 @@ public sealed partial class GameServer
         Disconnect(client, "kicked: " + reason);
     }
 
-    private bool PasswordRequired => !string.IsNullOrEmpty(options.Password);
+    /// <summary>Admin override from the state file, otherwise the configured password.</summary>
+    private string? EffectivePassword => state.PasswordDisabled ? null : state.PasswordOverride ?? options.Password;
+
+    private bool PasswordRequired => !string.IsNullOrEmpty(EffectivePassword);
+
+    private void LoadState()
+    {
+        if (string.IsNullOrEmpty(options.StateFile))
+        {
+            return;
+        }
+        state = ServerState.Load(options.StateFile);
+        bans = state.Bans.ToDictionary(b => ServerState.Normalize(IPAddress.Parse(b.Ip)));
+        Log($"State geladen: {options.StateFile} ({bans.Count} Bans"
+            + (state.PasswordDisabled ? ", Passwort per Admin abgeschaltet" : state.PasswordOverride != null ? ", Passwort per Admin gesetzt" : string.Empty) + ")");
+    }
+
+    /// <summary>Persists bans and password changes. Runs under <c>sync</c>.</summary>
+    private void SaveState()
+    {
+        state.Bans = bans.Values.OrderBy(b => b.CreatedUtc).ToList();
+        if (string.IsNullOrEmpty(options.StateFile))
+        {
+            return;
+        }
+        state.Save(options.StateFile);
+    }
 
     private async Task ServeAsync(Client client, CancellationToken token)
     {
@@ -567,7 +598,7 @@ public sealed partial class GameServer
 
     private bool ProofMatches(string nonce, string proof)
     {
-        byte[] expected = Encoding.ASCII.GetBytes(Protocol.AuthProof(options.Password!, nonce));
+        byte[] expected = Encoding.ASCII.GetBytes(Protocol.AuthProof(EffectivePassword!, nonce));
         byte[] actual = Encoding.ASCII.GetBytes((proof ?? string.Empty).Trim().ToLowerInvariant());
         return CryptographicOperations.FixedTimeEquals(expected, actual);
     }

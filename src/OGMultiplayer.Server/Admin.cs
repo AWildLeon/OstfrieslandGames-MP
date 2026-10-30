@@ -24,12 +24,12 @@ public sealed partial class GameServer
         ("say <text>", "Nachricht an alle Spieler"),
         ("sayroom <raum> <text>", "Nachricht an einen Raum"),
         ("kick <id> [grund]", "Spieler trennen"),
-        ("ban <id|ip> [grund]", "IP sperren (bis zum Neustart) und trennen"),
+        ("ban <id|ip> [grund]", "IP dauerhaft sperren und trennen"),
         ("unban <ip>", "Sperre aufheben"),
-        ("bans", "gesperrte IPs"),
+        ("bans", "gesperrte IPs mit Grund und Datum"),
         ("endmatch <raum>", "laufende Runde beenden (Unfertige = 0 Punkte)"),
         ("closeroom <raum> [grund]", "alle Spieler eines Raums trennen"),
-        ("password <neu|off>", "Server-Passwort aendern/abschalten (bis zum Neustart)"),
+        ("password <neu|off|reset>", "Passwort dauerhaft aendern/abschalten; reset = wieder aus der Konfiguration"),
         ("shutdown [sekunden] [grund]", "Server beenden, optional mit Countdown"),
         ("shutdown cancel", "geplanten Shutdown abbrechen"),
     };
@@ -103,7 +103,7 @@ public sealed partial class GameServer
                     "kick" => KickCommand(rest),
                     "ban" => Ban(rest),
                     "unban" => Unban(rest),
-                    "bans" => bans.Count == 0 ? "Keine Sperren." : string.Join("\n", bans.Select(b => b.ToString())),
+                    "bans" => BansText(),
                     "endmatch" => EndMatch(rest),
                     "closeroom" => CloseRoom(rest),
                     "password" => SetPassword(rest),
@@ -134,8 +134,9 @@ public sealed partial class GameServer
             $"Adresse:      {options.Bind}:{BoundPort} (Protokoll v{Protocol.Version})",
             $"Verbindungen: {clients.Count} ({inRooms} in Raeumen)",
             $"Raeume:       {rooms.Count} ({matches} mit laufender Runde)",
-            $"Passwort:     {(PasswordRequired ? "an" : "aus")}",
+            $"Passwort:     {(PasswordRequired ? "an" : "aus")}{(state.PasswordDisabled || state.PasswordOverride != null ? " (per Admin geaendert)" : string.Empty)}",
             $"Bans:         {bans.Count}",
+            $"State-Datei:  {(string.IsNullOrEmpty(options.StateFile) ? "keine (nichts bleibt erhalten)" : options.StateFile)}",
             pendingShutdown != null ? "Shutdown:     geplant" : "Shutdown:     -");
     }
 
@@ -231,6 +232,7 @@ public sealed partial class GameServer
             return "Aufruf: ban <id|ip> [grund]";
         }
         IPAddress? ip = null;
+        string? player = null;
         bool looksLikeIp = parts[0].Contains('.') || parts[0].Contains(':');
         if (looksLikeIp)
         {
@@ -238,17 +240,17 @@ public sealed partial class GameServer
         }
         else
         {
-            ip = FindClient(parts[0])?.Address;
+            Client? target = FindClient(parts[0]);
+            ip = target?.Address;
+            player = target?.Room != null ? target.Initials : null;
         }
         if (ip == null)
         {
             return $"'{parts[0]}' ist weder Spieler-ID noch IP.";
         }
-        if (ip.IsIPv4MappedToIPv6)
-        {
-            ip = ip.MapToIPv4();
-        }
-        bans.Add(ip);
+        ip = ServerState.Normalize(ip);
+        bans[ip] = new BanEntry { Ip = ip.ToString(), Reason = parts.Length > 1 ? parts[1] : null, Player = player, CreatedUtc = DateTime.UtcNow };
+        SaveState();
         string reason = parts.Length > 1 ? "Gesperrt: " + parts[1] : "Vom Admin gesperrt.";
         int n = 0;
         foreach (Client c in clients.Where(c => c.Address.Equals(ip)).ToList())
@@ -265,8 +267,24 @@ public sealed partial class GameServer
         {
             return "Aufruf: unban <ip>";
         }
+        ip = ServerState.Normalize(ip);
         authFailures.Remove(ip);
-        return bans.Remove(ip) ? $"{ip} entsperrt." : $"{ip} war nicht gesperrt (Fehlversuche zurueckgesetzt).";
+        if (!bans.Remove(ip))
+        {
+            return $"{ip} war nicht gesperrt (Fehlversuche zurueckgesetzt).";
+        }
+        SaveState();
+        return $"{ip} entsperrt.";
+    }
+
+    private string BansText()
+    {
+        if (bans.Count == 0)
+        {
+            return "Keine Sperren.";
+        }
+        return string.Join("\n", bans.Values.OrderBy(b => b.CreatedUtc).Select(b =>
+            $"{b.Ip,-39} {b.CreatedUtc.ToLocalTime():yyyy-MM-dd HH:mm}  {b.Player ?? "-",-3}  {b.Reason ?? "-"}"));
     }
 
     private string EndMatch(string rest)
@@ -310,15 +328,29 @@ public sealed partial class GameServer
     {
         if (rest.Length == 0)
         {
-            return "Aufruf: password <neu|off>";
+            return "Aufruf: password <neu|off|reset>";
         }
+        string result;
         if (rest.Equals("off", StringComparison.OrdinalIgnoreCase))
         {
-            options.Password = null;
-            return "Passwort abgeschaltet (gilt fuer neue Verbindungen).";
+            state.PasswordDisabled = true;
+            state.PasswordOverride = null;
+            result = "Passwort abgeschaltet";
         }
-        options.Password = rest;
-        return "Passwort geaendert (gilt fuer neue Verbindungen; verbundene Spieler bleiben).";
+        else if (rest.Equals("reset", StringComparison.OrdinalIgnoreCase))
+        {
+            state.PasswordDisabled = false;
+            state.PasswordOverride = null;
+            result = PasswordRequired ? "Passwort wieder aus der Konfiguration" : "Passwort-Aenderung verworfen, Server ist offen";
+        }
+        else
+        {
+            state.PasswordDisabled = false;
+            state.PasswordOverride = rest;
+            result = "Passwort geaendert";
+        }
+        SaveState();
+        return result + " (gilt fuer neue Verbindungen" + (string.IsNullOrEmpty(options.StateFile) ? ", nur bis zum Neustart)." : ", dauerhaft).");
     }
 
     private string ScheduleShutdown(string rest)
