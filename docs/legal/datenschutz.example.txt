@@ -14,8 +14,8 @@ Beim Verbinden mit diesem Server werden verarbeitet:
 Es werden keine Konten angelegt und keine Spielstände dauerhaft gespeichert.
 
 3. Zweck und Rechtsgrundlage
-Bereitstellung des Mehrspieler-Dienstes (Art. 6 Abs. 1 lit. b DSGVO) sowie Schutz
-des Servers vor Missbrauch (Art. 6 Abs. 1 lit. f DSGVO, berechtigtes Interesse).
+Bereitstellung des Mehrspieler-Dienstes, den du nutzen möchtest, sowie Schutz
+des Servers vor Missbrauch (berechtigtes Interesse des Betreibers).
 
 4. Speicherdauer
 Verbindungsdaten und Spielstände liegen nur im Arbeitsspeicher und werden beim
