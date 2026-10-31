@@ -113,6 +113,24 @@ public sealed class ServerFixture : IAsyncDisposable
 
     public TestClient Connect() => new(Server.BoundPort);
 
+    /// <summary>
+    /// Polls an admin command until its output satisfies the check (or 5 s pass), for state the
+    /// server reaches on its own time, such as noticing a closed connection.
+    /// </summary>
+    public string AdminEventually(string command, Func<string, bool> check)
+    {
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (true)
+        {
+            string output = Server.ExecuteAdmin(command);
+            if (check(output) || DateTime.UtcNow > until)
+            {
+                return output;
+            }
+            Thread.Sleep(20);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         await Server.RequestShutdown(null, TimeSpan.Zero);
@@ -520,7 +538,7 @@ public class BotTests
         late.Hello("LAT");
         Assert.Contains("voll", late.Next(Protocol.Error)[1]);
         host.Send(Protocol.Bot, Protocol.BotRemove);
-        Thread.Sleep(200);
+        Assert.Contains("[3/4]", fx.AdminEventually("rooms", r => r.Contains("[3/4]")));
         late.Send(Protocol.JoinRoom, "raum", string.Empty);
         Assert.Equal("raum", late.Next(Protocol.Joined)[1]);
     }
@@ -535,8 +553,7 @@ public class BotTests
             host.Send(Protocol.Bot, Protocol.BotAdd);
             host.Next(Protocol.Lobby);
         }
-        Thread.Sleep(500);
-        Assert.Equal("Keine Raeume.", fx.Server.ExecuteAdmin("rooms"));
+        Assert.Equal("Keine Raeume.", fx.AdminEventually("rooms", r => r == "Keine Raeume."));
     }
 
     [Fact]
@@ -588,8 +605,7 @@ public class RoomTests
         guest.Next(Protocol.RoomLeft);
         host.Send(Protocol.LeaveRoom);
         host.Next(Protocol.RoomLeft);
-        Thread.Sleep(200);
-        Assert.Equal("Keine Raeume.", fx.Server.ExecuteAdmin("rooms"));
+        Assert.Equal("Keine Raeume.", fx.AdminEventually("rooms", r => r == "Keine Raeume."));
     }
 
     [Fact]
