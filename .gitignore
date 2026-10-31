@@ -13,3 +13,4 @@ BepInEx/
 *.tar.zst
 ogmultiplayer-state.json
 *.json.tmp
+TestResults/

@@ -1,0 +1,347 @@
+# Developer-Doku
+
+Technische Beschreibung des Online-Mehrspieler-Mods für *Ostfriesland Games*.
+Für Spieler und Server-Betreiber reicht die [README](README.md).
+
+> Inoffizielles Fan-Projekt, keine Verbindung zu den Entwicklern des Spiels.
+> Im Repo liegt **kein** Code und **keine** Datei des Spiels; das Plugin wird gegen die
+> lokale Spielinstallation kompiliert und ruft Spielcode nur zur Laufzeit auf.
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Mehrspieler-Auswahl](docs/screenshots/01-mehrspieler.png) | ![Figurenauswahl des Spiels, 1 Spieler](docs/screenshots/02-figurenauswahl.png) |
+| **Mehrspieler-Auswahl** (`OnlineMenu`, Seite *Choice*) | **Figurenauswahl des Spiels** im 1-Spieler-Modus (`OnlineSetup`) |
+| ![Verbinden](docs/screenshots/03-verbinden.png) | ![Lobby, wartet](docs/screenshots/04-lobby-warten.png) |
+| **Verbinden** mit Figur + Spruch (`OnlineMenu`, *Connect*) | **Lobby** allein, Statuszeile „Warte auf andere Spieler“ |
+| ![Lobby Host mit Bot](docs/screenshots/05-lobby-host-bots.png) | ![Runde mit HUD](docs/screenshots/06-runde-hud.png) |
+| **Lobby als Host** mit Mitspieler und Server-Bot | **Laufende Runde** mit Spielerliste (`OnlineHud`) |
+| ![Ergebnis](docs/screenshots/07-ergebnis.png) | |
+| **Ergebnis** im Original-Bildschirm (Bot „MOI“ auf Platz 2) | |
+
+Alle Bilder stammen aus automatisierten Testläufen (Xvfb, siehe [Testen](#testen)).
+
+## Überblick
+
+```mermaid
+flowchart LR
+    subgraph Spiel A [Spiel + BepInEx]
+        PA[OGMultiplayer.dll] -- Harmony --> GA[HotSeatFlowController<br/>& Spiel-UI]
+    end
+    subgraph Spiel B [Spiel + BepInEx]
+        PB[OGMultiplayer.dll] -- Harmony --> GB[HotSeatFlowController<br/>& Spiel-UI]
+    end
+    PA -- TCP, Zeilenprotokoll --> S[(OGMultiplayer.Server<br/>Räume, Runden, Bots,<br/>Admin, State-Datei)]
+    PB -- TCP --> S
+    PA -. offline .-> L[LocalBotServer<br/>im Plugin]
+```
+
+Grundidee: Das Spiel hat einen lokalen **Hot-Seat-Modus** (`HotSeatFlowController`):
+Spieler wechseln sich ab, jede Disziplin meldet am Ende `TryCompleteTurn(score)`, danach
+kommt ein Ergebnisbildschirm. Der Mod baut daraus eine Online-Runde, in der **alle
+gleichzeitig** spielen:
+
+1. Jeder Client erzeugt einen eigenen Hot-Seat-Controller mit allen Spielern des Raums,
+   der **lokale Spieler immer auf Platz 1** (Turn 0).
+2. Der eigene Zug startet erst, wenn der Server `GO` sendet (alle bereit).
+3. Nach dem eigenen Zug wird nicht an „Spieler 2“ übergeben, sondern der Score an den
+   Server geschickt.
+4. Kommt `RESULT`, trägt der Client die Scores der anderen in die Hot-Seat-Runde ein und
+   öffnet den normalen Ergebnisbildschirm des Spiels.
+
+So bleiben alle Disziplinen, Countdown, Ergebnisanzeige, Revanche usw. Original-Spielcode.
+
+## Repository
+
+```
+src/Shared/Protocol.cs              Wire-Protokoll (Plugin + Server teilen die Datei)
+src/Shared/Bots.cs                  Bot-Verhalten (Plugin-Offline-Modus + Server)
+src/OGMultiplayer.Plugin/           BepInEx-5-Plugin, netstandard2.1
+  Plugin.cs                         Einstieg, Konfiguration, Harmony, Komponenten
+  OnlineSession.cs                  Verbindung + Rundensteuerung (Zustandsautomat)
+  NetClient.cs                      ITransport + TCP-Client (Hintergrundthread)
+  LocalBotServer.cs                 ITransport ohne Netz für „Gegen Bots“
+  Patches.cs                        Alle Harmony-Patches
+  GameBridge.cs                     Zugriff auf nicht-öffentliche Spielteile (Reflection)
+  OnlineSetup.cs                    Figurenauswahl des Spiels für 1 Spieler nutzen
+  OnlineMenu.cs                     Online-Seiten im Stil der Spielmenüs (uGUI)
+  OnlineHud.cs                      Overlay: Spielerliste, Banner, Meldungen
+src/OGMultiplayer.Server/           .NET-8-Server, keine Abhängigkeiten
+  Server.cs                         Netzwerk, Räume, Runden, Auth, Bots
+  Admin.cs                          Admin-Konsole (stdin), Shutdown
+  State.cs                          State-Datei (Bans, Passwort-Override)
+  Program.cs                        CLI-Optionen, Signale
+tests/OGMultiplayer.Server.Tests/   xUnit-Tests gegen echten Server auf Port 0
+scripts/install.sh                  BepInEx installieren + Plugin bauen
+scripts/update-bepinex.sh           BepInEx-Pin auf neueste 5.x-Version heben
+flake.nix                           Pakete, Apps (install/play/server), NixOS-Modul
+.github/                            CI, Wartung, Release, Dependabot
+docs/screenshots/                   Bilder für diese Doku
+```
+
+## Bauen
+
+Voraussetzungen: .NET SDK 8 (`nix develop` bringt es mit) und für das Plugin eine
+Linux-Spielinstallation mit entpacktem BepInEx 5.
+
+```bash
+dotnet build src/OGMultiplayer.Server -c Release
+```
+
+```bash
+dotnet test tests/OGMultiplayer.Server.Tests
+```
+
+```bash
+dotnet build src/OGMultiplayer.Plugin -c Release -p:GameDir="/pfad/zu/Ostfriesland Games"
+```
+
+Das Plugin-Projekt referenziert `Assembly-CSharp.dll`, die Unity-Module aus
+`OG_Data/Managed` und `BepInEx.dll`/`0Harmony.dll` aus `BepInEx/core` per `HintPath`
+mit `Private=false`: nichts davon landet im Build-Ordner oder im Repo, und der Build braucht
+keine NuGet-Pakete. `GameDir` geht auch per Umgebungsvariable `OG_GAME_DIR`.
+`scripts/install.sh` erledigt BepInEx + Build + Kopie in `BepInEx/plugins/OGMultiplayer/`.
+
+Getestet mit der Linux-Version auf **Unity 6000.4.0f1 (Mono)** und **BepInEx 5.4.23.4**.
+Die Meldung `Unable to start Unity log writer` von BepInEx unter Unity 6 ist harmlos.
+
+## Plugin
+
+### Komponenten
+
+`Plugin.Awake` bindet die Konfiguration (`BepInEx/config/de.onlh.ostfriesland.multiplayer.cfg`),
+prüft per Reflection alle benötigten Spiel-Interna (`GameBridge.MissingMembers`,
+`OnlineSetup.MissingMembers`; Fehlendes wird ins Log geschrieben), führt
+`Harmony.PatchAll` aus und hängt an ein `DontDestroyOnLoad`-Objekt:
+
+| Komponente | Aufgabe |
+| --- | --- |
+| `OnlineSession` | Verbindung, Lobby-Zustand, Online-Runde steuern, Nachrichten verarbeiten |
+| `OnlineMenu` | Online-Seiten (Choice, Connect, Lobby) |
+| `OnlineHud` | Overlay während Runden und im Hauptmenü |
+
+### Transport
+
+`ITransport` (`Send`, `TryReceive`, `Tick`, `LastError`) hat zwei Implementierungen:
+
+- **`NetClient`**: TCP auf einem Hintergrundthread; empfangene Zeilen landen in einer
+  `ConcurrentQueue` und werden in `OnlineSession.Update` auf dem Unity-Hauptthread
+  verarbeitet. Einmal pro Verbindung, Trennung erzeugt eine Marker-Zeile.
+- **`LocalBotServer`**: Für „Gegen Bots“. Spricht dasselbe Protokoll in-process für einen
+  Menschen plus Bots, ohne Netz. Bot-Punkte orientieren sich an der lokalen Bestenliste
+  (`GameBridge.LocalScores`).
+
+Dadurch läuft der Offline-Modus durch exakt denselben Code wie Online-Runden.
+
+### Ablauf einer Runde
+
+```mermaid
+sequenceDiagram
+    participant H as Host-Client
+    participant S as Server
+    participant G as Gast-Client
+    H->>S: START discipline
+    S->>H: BEGIN id discipline players
+    S->>G: BEGIN id discipline players
+    Note over H,G: CreateController + ConfigurePlayers + BeginMatch<br/>(lokaler Spieler = Platz 1)
+    H->>S: READY id (TryAwaitTurnStart)
+    G->>S: READY id
+    S->>H: GO id
+    S->>G: GO id
+    Note over H,G: StartTurn, Disziplin läuft, LIVE id score (1/s)
+    H->>S: SCORE id 1000 (TryCompleteTurn)
+    G->>S: SCORE id 800
+    S->>H: RESULT id scores
+    S->>G: RESULT id scores
+    Note over H,G: restliche Turns eintragen, Ergebnisbildschirm des Spiels
+```
+
+### Harmony-Patches
+
+Alle Patches sind No-ops, solange der aktive `HotSeatFlowController` nicht vom Mod stammt
+(`OnlineSession.IsOnlineController`, bzw. `OnlineSetup.IsSetupController`).
+
+| Ziel | Art | Zweck |
+| --- | --- | --- |
+| `HotSeatFlowController.TryAwaitTurnStart` | Postfix | `READY` senden |
+| `HotSeatFlowController.StartTurn` | Prefix | nur nach `GO` (Aufruf aus dem Mod mit `RunAuthorized`) |
+| `HotSeatFlowController.TryCompleteTurn` | Prefix | eigenen Score eintragen, `SCORE` senden, kein Spielerwechsel |
+| `HotSeatFlowController.SaveHighscores` | Prefix | nur eigener Score, nur lokal, nie in die Upload-Outbox |
+| `HotSeatFlowController.BeginMatch` / `Rematch` / `ChooseDiscipline` | Prefix | nur Host; wird zu `START` |
+| `HotSeatFlowController.EditPlayers` | Prefix | Online: zurück ins Menü statt lokaler Spielerwahl |
+| `HotSeatFlowController.Abort` | Prefix | `LEAVE` senden (0 Punkte) |
+| `HotSeatFlowController.ConfigurePlayers` | Prefix | Setup-Modus: gewählte Figur/Initialen übernehmen |
+| `HotSeatCharacterSetup.Initialize` | Postfix | Setup-Modus: 1 Spieler, Start bei Figurenwahl |
+| `HotSeatCharacterSetup.Back` | Postfix | Setup-Modus: Abbruch zurück ins Online-Menü |
+| `StartScreenMenuController.OpenMultiplayer` | Prefix | „Mehrspieler“ öffnet die Auswahlseite |
+| `StartScreenMenuController.Update` | Prefix | Hauptmenü verbergen/sperren, solange eine Online-Seite offen ist |
+| `StartScreenCameraScroller.Update` | Prefix | kein Zurückscrollen zum Logo beim Schließen einer Online-Seite |
+| `OnlineScoreSync.Send` | Prefix | Score-API des Spiels sperren, solange online |
+
+### Spiel-Interna (`GameBridge`, `OnlineSetup`)
+
+Was nicht öffentlich ist, wird ausschließlich in diesen beiden Dateien per `AccessTools`
+angesprochen (private Setter, Felder `screen`, `waitingOwner`, Methoden
+`RefreshHighscoreEligibility`, `PresentMenu`, `ScoreStore.doc/Save`, Registrierungs-Schritte
+von `HotSeatCharacterSetup` …). Ändert ein Spiel-Update diese Stellen, meldet das Plugin beim
+Start die fehlenden Member; angepasst werden muss dann nur hier.
+
+`GameBridge.CreateController` erzeugt einen Hot-Seat-Controller wie
+`HotSeatFlowController.Open`, aber ohne die lokale Spielerwahl.
+
+### Spielerwahl über die Figurenauswahl des Spiels
+
+`OnlineSetup.Begin` startet die echte Hot-Seat-Registrierung (Ostfriesland-Karte, Pins,
+großes Portrait, Sprechblase, Initialen-Kästchen) mit einem eigenen Controller. Der
+Postfix auf `HotSeatCharacterSetup.Initialize` setzt `PlayerCount = 1` und springt direkt
+zur Figurenwahl; der Prefix auf `ConfigurePlayers` liest Figur und Initialen ab, speichert
+sie in der Konfiguration und kehrt ins Start-Menü zurück (`OnlineSetup.Finished`), wo
+`OnlineMenu` die passende Seite öffnet. Die Initialen-Sperrliste des Spiels gilt dabei.
+
+### Menüs und HUD
+
+`OnlineMenu` baut Canvas, Texte, Auswahlpfeil und Puls-Effekt aus den Bausteinen des
+Start-Menüs (`ApplyMultiplayerTextStyle`, `ApplyMultiplayerSelectionEffect`,
+Auswahlpfeil-Sprite, Referenzauflösung des Menü-Canvas). Eingaben laufen über `ArcadeInput`
+(Tastatur/Controller) und uGUI-Buttons (Maus). Textfelder (Server, Passwort, Raum) werden
+inline mit `Input.inputString` bearbeitet. Rechts steht die gewählte Figur
+(`bigPortrait`, unten am Bildrand verankert) mit einem Spruch aus `CharacterQuotes`
+in einer selbst gezeichneten 9-Slice-Sprechblase in den Farben der Spiel-Blase.
+
+Wichtige Regeln:
+
+- Lobby verlassen (`Raum verlassen`/Esc) trennt immer die Verbindung.
+- Nach `VERBINDEN` geht es automatisch in die Lobby; erneutes Drücken trennt nicht.
+- Endet eine Online-Runde (Ergebnis → Menü), öffnet sich die Lobby wieder
+  (`OnlineSession.ReturnToLobby`).
+
+`OnlineHud` ist ein Overlay-Canvas (Sortierung 900) mit Spielschrift und Schatten:
+Spielerliste (Ecke konfigurierbar), Warte-Banner, Meldungen. Auf den Ergebnis-/Setup-Seiten
+des Spiels ist die Liste aus.
+
+### Score-API des Spiels
+
+`OnlineScoreSync` schickt alle HTTP-Anfragen über die Coroutine `Send(UnityWebRequest)`.
+Solange `OnlineSession.BlocksScoreApi` gilt (TCP-Verbindung offen oder Online-Controller
+aktiv, abschaltbar per `Privacy.BlockScoreApiWhileOnline`), liefert der Prefix eine leere
+Coroutine: die Anfrage wird nie gestartet, das Spiel behandelt sie als Fehler und versucht
+es später. Zusätzlich entfernt `GameBridge.SubmitLocalOnly` Scores aus Online-Runden sofort
+wieder aus der Upload-Outbox.
+
+## Protokoll
+
+Definiert in [`src/Shared/Protocol.cs`](src/Shared/Protocol.cs). Eine Nachricht = eine
+UTF-8-Zeile, Felder durch Tab getrennt, Unterfelder durch `|`. Version: **1**.
+
+| Richtung | Nachricht | Bedeutung |
+| --- | --- | --- |
+| S→C | `CHALLENGE ver nonce pwRequired` | sofort nach dem Verbinden |
+| C→S | `HELLO ver INI char room proof` | Anmeldung; `proof` = hex HMAC-SHA256(Passwort, Nonce) oder leer |
+| S→C | `WELCOME id` / `ERROR text` / `BYE grund` | Antwort / Fehler / Trennung mit Grund |
+| S→C | `LOBBY room hostId state botLevel player*` | `player` = `id\|INI\|char\|status\|score\|bot` |
+| C→S | `CHAR characterId` | Figur in der Lobby ändern |
+| C→S | `BOT ADD` / `BOT REMOVE` / `BOT LEVEL n` | nur Host, nur in der Lobby |
+| C→S | `START discipline` | nur Host |
+| S→C | `BEGIN matchId discipline player*` | `player` = `id\|INI\|char` |
+| C→S | `READY matchId` | Client wartet am Rundenstart |
+| S→C | `GO matchId` | alle bereit (oder Ready-Timeout) |
+| C→S | `LIVE matchId score` | Live-Punkte (Padstock, Bosseln, Krabbenpulen) |
+| C→S | `SCORE matchId score` / `LEAVE matchId` | Runde fertig / abgebrochen (0 Punkte) |
+| S→C | `RESULT matchId id\|score*` | alle fertig |
+| S→C | `MSG text` | Admin-Nachricht |
+| beide | `PING` / `PONG` | Keepalive (Client alle 5 s) |
+
+Disziplinen: `0` Padstock, `1` Schlick, `2` Bosseln, `3` Teezeremonie, `4` Krabbenpulen.
+Bei inkompatiblen Änderungen `Protocol.Version` erhöhen; der Server lehnt andere Versionen ab.
+
+## Server
+
+### Aufbau
+
+- `TcpListener`, pro Verbindung ein Lese-Task; **alle Zustandsänderungen unter einem Lock**
+  (`sync`), daher keine Races zwischen Räumen, Runden, Admin und Tick.
+- Ausgehende Zeilen gehen über einen begrenzten `Channel` pro Client mit eigenem
+  Schreib-Task, langsame Clients blockieren niemanden.
+- Ein Tick pro Sekunde: Timeouts, Ready-Timeout, Match-Timeout, Bots, Aufräumen.
+
+| Grenze | Standard |
+| --- | --- |
+| Spieler pro Raum | 2–4 (Bots zählen mit) |
+| Handshake / Idle | 15 s / 30 s |
+| Warten auf `READY` aller | 60 s, danach `GO` für die Bereiten |
+| maximale Rundendauer | 20 min, Unfertige bekommen 0 |
+| Passwort-Fehlversuche | 5 in 5 min pro IP, danach Sperre |
+| Zeilenlänge | 4096 Zeichen |
+
+### Räume und Runden
+
+Der erste menschliche Spieler im Raum ist Host. `START` legt eine `Match` mit allen
+aktuellen Mitgliedern an; wer später kommt, wartet bis zur nächsten Runde. Verlässt ein
+Spieler die Runde oder trennt die Verbindung, bekommt er 0 Punkte. Sobald alle fertig sind,
+geht `RESULT` an alle Mitglieder und der Raum ist wieder in der Lobby. Räume ohne Menschen
+werden geschlossen.
+
+### Bots
+
+Bots sind `Client`-Objekte ohne Verbindung (`IsBot`). Beim `START` bekommen sie einen
+Zielwert (`Bots.TargetScore`) und eine Dauer (20–60 s); während der Runde wächst ihr
+Live-Score linear, spätestens wenn alle Menschen fertig sind, melden sie ihren Endstand.
+
+Zielwert = Referenz × Faktor (leicht 0,55 / mittel 0,88 / schwer 1,2) × Streuung 0,75–1,25.
+Referenz ist der Median der letzten echten Ergebnisse dieser Disziplin auf dem Server
+(offline: der lokalen Bestenliste), ohne Daten 1050 (Mitte der Startwerte der
+Spiel-Bestenliste 600–1500).
+
+### Passwort
+
+Challenge-Response: pro Verbindung eine zufällige Nonce, der Client antwortet mit
+`HMAC-SHA256(key=Passwort, msg=Nonce)` als Hex; Vergleich mit
+`CryptographicOperations.FixedTimeEquals`. Das Passwort geht nie über die Leitung; gegen
+Mitschnitt schwacher Passwörter hilft nur ein starkes Passwort oder ein VPN.
+
+### Admin-Konsole und State-Datei
+
+Befehle kommen zeilenweise von stdin (`Admin.cs`, `help`). `shutdown` kündigt den Neustart
+im Spiel an (`MSG`), trennt alle mit `BYE` und beendet den Server; SIGTERM/Strg+C laufen
+denselben Weg.
+
+Bans und Passwort-Änderungen per Konsole landen in einer JSON-State-Datei
+(`--state-file`, Standard `./ogmultiplayer-state.json`): atomar geschrieben (Temp-Datei +
+Rename), Modus 0600. Eine kaputte Datei verhindert den Start, damit Bans nicht still
+verloren gehen.
+
+## Testen
+
+**Automatisch:** `tests/OGMultiplayer.Server.Tests` startet echte Server auf Port 0 und
+spricht das Protokoll per TCP: Auth (richtig/falsch/fehlend/Sperre), kompletter
+Rundenablauf, Abbruch, Raumlimit, Admin-Befehle, Shutdown, State-Datei über Neustarts,
+Bots. Läuft in der CI.
+
+**Im Spiel (manuell, nicht im Repo):** Für die Entwicklung liefen zwei Spielinstanzen unter
+`xvfb-run` (llvmpipe, `vblank_mode=0`) mit einem kleinen zusätzlichen BepInEx-Test-Plugin,
+das Menüs per Reflection auslöst, Runden über `TryCompleteTurn` beendet, die Sprache auf
+Deutsch stellt und Screenshots macht. Echte Tastendrücke kamen per `xdotool`. Die zweite
+Instanz war eine Hardlink-Kopie des Spielordners mit eigenem `BepInEx/`.
+
+Bekannte Lücken: kein Test mit echtem Controller, kein Test unter Windows.
+
+## Automatisierung
+
+| Workflow | Auslöser | Inhalt |
+| --- | --- | --- |
+| `ci.yml` | Push, PR | Server bauen + testen, `nix flake check`, Nix-Builds, shellcheck, actionlint; Dependabot-Automerge (Patch/Minor) nach grünem CI |
+| `maintenance.yml` | montags, manuell | `nix flake update` + `scripts/update-bepinex.sh`, alles prüfen, PR erstellen und mergen |
+| `release.yml` | Tag `v*` | Tests, Server als Single-File für linux-x64/linux-arm64/win-x64, GitHub-Release |
+
+Das Plugin kann die CI nicht bauen (es braucht die Spiel-DLLs), daher gibt es auch keine
+Plugin-Releases; Nutzer bauen es bei der Installation selbst.
+
+## Konventionen
+
+- Keine Dateien des Spiels ins Repo (auch keine dekompilierten Quellen).
+- Zugriff auf private Spiel-Interna nur über `GameBridge`/`OnlineSetup`.
+- Sichtbare Texte auf Deutsch in Großbuchstaben wie im Spiel; die Pixel-Schrift kann Umlaute.
+- Protokolländerungen immer in `src/Shared/Protocol.cs` dokumentieren und in Plugin und
+  Server gleichzeitig umsetzen; Server-Tests ergänzen.
+- Commits: Autor Leon Hubrich, Claude als `Co-Authored-By`.

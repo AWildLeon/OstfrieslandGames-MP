@@ -8,6 +8,13 @@
 Ein [BepInEx](https://github.com/BepInEx/BepInEx)-Mod plus kleiner Server, der den
 lokalen Hot-Seat-Modus von *Ostfriesland Games* ins Netz bringt.
 
+| | |
+| --- | --- |
+| ![Mehrspieler-Auswahl](docs/screenshots/01-mehrspieler.png) | ![Lobby](docs/screenshots/05-lobby-host-bots.png) |
+| ![Runde](docs/screenshots/06-runde-hud.png) | ![Ergebnis](docs/screenshots/07-ergebnis.png) |
+
+Technische Details: [Developer.md](Developer.md).
+
 Alle Spieler eines Raums spielen **gleichzeitig dieselbe Disziplin auf ihrem eigenen
 Rechner**. Der Server sorgt für einen gemeinsamen Start, zeigt live, wer noch spielt
 (bei Padstockspringen, Bosseln und Krabbenpulen inkl. Live-Punkten), sammelt die
@@ -81,6 +88,8 @@ cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
    Nach dem Verbinden geht es automatisch in die Lobby. Dort zeigt eine Statuszeile, worauf
    gewartet wird („Warte auf andere Spieler …“, „Warte auf den Host …“), freie Plätze sind
    abgeblendet sichtbar.
+   *Raum verlassen* (oder Esc) in der Lobby trennt die Verbindung. Nach einer Runde kommst du
+   automatisch zurück in die Lobby.
 4. Sobald mindestens zwei Spieler (oder Bots) im Raum sind, wählt der Host die Disziplin
    und startet die Runde.
 5. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.
@@ -255,6 +264,9 @@ Nicht automatisierbar: ein Spiel-Update, das gepatchte Methoden ändert. Das Plu
 beim Start im BepInEx-Log; dann `GameBridge.cs`/`Patches.cs` anpassen.
 
 ## Entwicklung
+
+Ausführliche technische Beschreibung (Architektur, Patches, Protokoll, Server, Tests): **[Developer.md](Developer.md)**.
+
 
 ```
 src/Shared/Protocol.cs          gemeinsames Protokoll
