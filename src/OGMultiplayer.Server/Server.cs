@@ -100,6 +100,12 @@ public sealed partial class GameServer
         LoadState();
         LoadDocuments();
         var listener = new TcpListener(options.Bind, options.Port);
+        if (options.Bind.Equals(IPAddress.IPv6Any))
+        {
+            // .NET opens IPv6 sockets with IPV6_V6ONLY; "::" is meant to take IPv4 too
+            // (clients then arrive as ::ffff:a.b.c.d, mapped back by ServerState.Normalize).
+            listener.Server.DualMode = true;
+        }
         listener.Start();
         BoundPort = ((IPEndPoint)listener.LocalEndpoint).Port;
         started.TrySetResult();

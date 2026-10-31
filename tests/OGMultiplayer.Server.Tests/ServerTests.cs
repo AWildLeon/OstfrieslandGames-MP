@@ -160,6 +160,14 @@ public class ServerTests
     }
 
     [Fact]
+    public async Task IPv6AnyAcceptsIPv4()
+    {
+        await using var fx = new ServerFixture(configure: o => o.Bind = IPAddress.IPv6Any);
+        using var a = fx.Connect(); // connects to 127.0.0.1
+        Assert.Equal(Protocol.Welcome, a.Hello("AAA")[0]);
+    }
+
+    [Fact]
     public async Task PasswordIsChecked()
     {
         await using var fx = new ServerFixture("geheim");
