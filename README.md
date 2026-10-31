@@ -123,6 +123,18 @@ löschen.
 
 Unten rechts siehst du während einer Runde alle Spieler mit Status und Punkten.
 
+### Serverliste
+
+Öffentliche Server, auf denen du ohne eigenen Server spielen kannst. Adresse auf der
+Online-Seite unter *Server* eintragen.
+
+| Server | Adresse | Betreiber | Hinweise |
+| --- | --- | --- | --- |
+| Offizieller Server | `ogmp.onlh.de:27420` | Leon Hubrich | ohne Passwort, „Best Effort“: privat betrieben, Ausfälle jederzeit ohne Ankündigung möglich |
+
+Du betreibst selbst einen öffentlichen Server (`--public`, siehe [Öffentlicher Server](#öffentlicher-server))?
+Trag ihn per Pull Request in die Tabelle ein.
+
 ### Bots
 
 - **Online:** Der Host stellt in der Lobby *Bots* (Anzahl) und *Bot-Stärke* ein. Bots belegen
