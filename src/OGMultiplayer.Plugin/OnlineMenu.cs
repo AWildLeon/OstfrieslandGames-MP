@@ -21,7 +21,10 @@ namespace OGMultiplayer.Plugin
         {
             Choice,
             Connect,
-            Lobby
+            Lobby,
+            Legal,
+            Rooms,
+            CreateRoom
         }
 
         private enum Field
@@ -29,7 +32,11 @@ namespace OGMultiplayer.Plugin
             None,
             Server,
             Password,
-            Room
+            Room,
+            JoinPassword,
+            CreateName,
+            CreatePassword,
+            RoomPassword
         }
 
         private sealed class Row
@@ -317,8 +324,17 @@ namespace OGMultiplayer.Plugin
                 case Page.Lobby:
                     RenderLobby();
                     break;
+                case Page.Legal:
+                    RenderLegal();
+                    break;
+                case Page.Rooms:
+                    RenderRooms();
+                    break;
+                case Page.CreateRoom:
+                    RenderCreateRoom();
+                    break;
             }
-            if (page != Page.Choice)
+            if (page != Page.Choice && page != Page.Legal)
             {
                 BuildShowcase();
             }
@@ -354,11 +370,267 @@ namespace OGMultiplayer.Plugin
             AddRow("Server", () => "SERVER: " + Shown(Field.Server, host + ":" + port), new Vector2(0f, y), () => BeginEdit(Field.Server), edit: Field.Server);
             AddRow("Password", () => "PASSWORT: " + (editing == Field.Password ? Mask(editBuffer) + Cursor() : string.IsNullOrEmpty(password) ? "KEINS" : Mask(password)),
                 new Vector2(0f, y - step), () => BeginEdit(Field.Password), edit: Field.Password);
-            AddRow("Room", () => "RAUM: " + Shown(Field.Room, room).ToUpperInvariant(), new Vector2(0f, y - 2 * step), () => BeginEdit(Field.Room), edit: Field.Room);
-            AddPlayerRow(new Vector2(0f, y - 3 * step), OnlineSetup.Purpose.Online);
-            AddRow("Connect", () => Session.Connecting ? "VERBINDE ..." : "VERBINDEN", new Vector2(0f, y - 4 * step), Connect);
-            AddRow("Back", () => "ZURÜCK", new Vector2(0f, y - 5 * step), () => Show(Page.Choice, 1));
+            AddPlayerRow(new Vector2(0f, y - 2 * step), OnlineSetup.Purpose.Online);
+            AddRow("Connect", () => Session.Connecting ? "VERBINDE ..." : "VERBINDEN", new Vector2(0f, y - 3 * step), Connect);
+            AddRow("Back", () => "ZURÜCK", new Vector2(0f, y - 4 * step), () => Show(Page.Choice, 1));
             PageFooter(string.Empty);
+        }
+
+        // ------------------------------------------------------------------ room browser
+
+        private const int RoomsPerPage = 5;
+        private int roomsPage;
+        private string joinTarget;
+        private string createName;
+        private string createPassword;
+        private int kickIndex;
+
+        private void RenderRooms()
+        {
+            Header(string.IsNullOrEmpty(Session.ServerName) ? "ONLINE" : "RÄUME", (Session.ServerName ?? string.Empty).ToUpperInvariant());
+            statusLine = NewText(pageRoot, "Status", string.Empty, 16, new Color(1f, 0.93f, 0.55f, 1f), new Vector2(0f, subtitle.rectTransform.anchoredPosition.y - 30f), new Vector2(1160f, 30f));
+            int pages = Mathf.Max(1, (Session.Rooms.Count + RoomsPerPage - 1) / RoomsPerPage);
+            roomsPage = Mathf.Clamp(roomsPage, 0, pages - 1);
+            float y = 160f;
+            const float step = 46f;
+            int n = 0;
+            if (Session.Rooms.Count == 0)
+            {
+                NewText(pageRoot, "Empty", "NOCH KEINE RÄUME - ERSTELL DEN ERSTEN!", 18, new Color(1f, 1f, 1f, 0.6f), new Vector2(0f, y), new Vector2(1000f, 40f));
+                n++;
+            }
+            foreach (RoomInfo r in Session.Rooms.Skip(roomsPage * RoomsPerPage).Take(RoomsPerPage))
+            {
+                RoomInfo info = r;
+                string label = $"{info.Name.ToUpperInvariant()}  {info.Players}/{info.Max}" + (info.Running ? "  LÄUFT" : string.Empty) + (info.Locked ? "  [PASSWORT]" : string.Empty);
+                AddRow("Room_" + info.Name, () => editing == Field.JoinPassword && joinTarget == info.Name ? "PASSWORT: " + Mask(editBuffer) + Cursor() : label,
+                    new Vector2(0f, y - step * n++), () => JoinListedRoom(info), edit: Field.JoinPassword);
+            }
+            n = Mathf.Max(n, 1);
+            float below = y - step * RoomsPerPage - 10f;
+            int m = 0;
+            if (pages > 1)
+            {
+                AddRow("RoomPage", () => $"SEITE {roomsPage + 1}/{pages}", new Vector2(0f, below - step * m++), () => roomsPage = (roomsPage + 1) % pages,
+                    horizontal: d => roomsPage = (roomsPage + pages + d) % pages);
+            }
+            AddRow("Create", () => "RAUM ERSTELLEN", new Vector2(0f, below - step * m++), () =>
+            {
+                createName = string.IsNullOrEmpty(createName) ? Plugin.RoomName.Value : createName;
+                createPassword = string.Empty;
+                Show(Page.CreateRoom, 0);
+            });
+            AddRow("Refresh", () => "AKTUALISIEREN", new Vector2(0f, below - step * m++), Session.RequestRooms);
+            if (Session.AvailableDocuments.Count > 0)
+            {
+                AddRow("Legal", () => "IMPRESSUM & DATENSCHUTZ", new Vector2(0f, below - step * m++), () =>
+                {
+                    legalConsent = false;
+                    legalDoc = 0;
+                    legalPage = 0;
+                    Show(Page.Legal, 0);
+                });
+            }
+            AddRow("Disconnect", () => "TRENNEN", new Vector2(0f, below - step * m++), Disconnect);
+            PageFooter(string.Empty);
+        }
+
+        private void JoinListedRoom(RoomInfo info)
+        {
+            if (info.Players >= info.Max)
+            {
+                Session.Toast("Der Raum ist voll.");
+                return;
+            }
+            if (info.Locked)
+            {
+                joinTarget = info.Name;
+                BeginEdit(Field.JoinPassword);
+                return;
+            }
+            Session.JoinRoom(info.Name, string.Empty);
+        }
+
+        private void RenderCreateRoom()
+        {
+            Header("RAUM ERSTELLEN", (Session.ServerName ?? string.Empty).ToUpperInvariant());
+            float y = 150f;
+            const float step = 60f;
+            AddRow("Name", () => "NAME: " + Shown(Field.CreateName, createName).ToUpperInvariant(), new Vector2(0f, y), () => BeginEdit(Field.CreateName), edit: Field.CreateName);
+            AddRow("Password", () => "PASSWORT: " + (editing == Field.CreatePassword ? Mask(editBuffer) + Cursor() : string.IsNullOrEmpty(createPassword) ? "KEINS (OFFEN)" : Mask(createPassword)),
+                new Vector2(0f, y - step), () => BeginEdit(Field.CreatePassword), edit: Field.CreatePassword);
+            AddRow("Create", () => "ERSTELLEN", new Vector2(0f, y - 2 * step), () =>
+            {
+                if (!string.IsNullOrEmpty(createName))
+                {
+                    Plugin.RoomName.Value = createName;
+                }
+                Session.CreateRoom(createName, createPassword);
+            });
+            AddRow("Back", () => "ZURÜCK", new Vector2(0f, y - 3 * step), () => Show(Page.Rooms, 0));
+            PageFooter(string.Empty);
+        }
+
+        private string KickTargetName()
+        {
+            List<LobbyPlayer> others = Session.Lobby.Where(p => p.Id != Session.MyId).ToList();
+            if (others.Count == 0)
+            {
+                return "-";
+            }
+            kickIndex = ((kickIndex % others.Count) + others.Count) % others.Count;
+            LobbyPlayer target = others[kickIndex];
+            return target.Initials + (target.IsBot ? " (BOT)" : string.Empty);
+        }
+
+        private void KickSelected()
+        {
+            List<LobbyPlayer> others = Session.Lobby.Where(p => p.Id != Session.MyId).ToList();
+            if (others.Count > 0)
+            {
+                Session.KickPlayer(others[((kickIndex % others.Count) + others.Count) % others.Count].Id);
+            }
+        }
+
+        // ------------------------------------------------------------------ legal texts (imprint, privacy, rules)
+
+        private bool legalConsent;
+        private int legalDoc;
+        private int legalPage;
+        private const int LegalLinesPerPage = 14;
+        private const int LegalCharsPerLine = 70;
+
+        private static readonly string[] LegalOrder = { Protocol.DocPrivacy, Protocol.DocImprint, Protocol.DocRules };
+
+        private static string LegalTitle(string kind)
+        {
+            switch (kind)
+            {
+                case Protocol.DocPrivacy:
+                    return "DATENSCHUTZ";
+                case Protocol.DocImprint:
+                    return "IMPRESSUM";
+                default:
+                    return "REGELN";
+            }
+        }
+
+        private List<string> LegalKinds()
+        {
+            return LegalOrder.Where(k => Session.Documents.ContainsKey(k) || Session.AvailableDocuments.Contains(k)).ToList();
+        }
+
+        private void RenderLegal()
+        {
+            List<string> kinds = LegalKinds();
+            legalDoc = kinds.Count == 0 ? 0 : Mathf.Clamp(legalDoc, 0, kinds.Count - 1);
+            string kind = kinds.Count > 0 ? kinds[legalDoc] : Protocol.DocPrivacy;
+            foreach (string k in kinds)
+            {
+                Session.RequestDocument(k);
+            }
+            Header(LegalTitle(kind), (Session.ServerName ?? string.Empty).ToUpperInvariant() + (legalConsent ? " - BITTE LESEN" : string.Empty));
+            List<string> lines = Session.Documents.TryGetValue(kind, out string text) ? Wrap(text, LegalCharsPerLine) : new List<string> { "LÄDT ..." };
+            int pages = Mathf.Max(1, (lines.Count + LegalLinesPerPage - 1) / LegalLinesPerPage);
+            legalPage = Mathf.Clamp(legalPage, 0, pages - 1);
+            string pageText = string.Join("\n", lines.Skip(legalPage * LegalLinesPerPage).Take(LegalLinesPerPage));
+            Image backdrop = NewImage(pageRoot, "LegalBackdrop", PauseMenuTheme.BackdropColor, new Vector2(0f, 38f), new Vector2(1100f, 330f));
+            backdrop.raycastTarget = false;
+            var go = new GameObject("LegalText", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            go.transform.SetParent(pageRoot, false);
+            Text body = go.GetComponent<Text>();
+            body.font = font;
+            body.fontSize = 14;
+            body.lineSpacing = 1.25f;
+            body.color = Color.white;
+            body.raycastTarget = false;
+            body.supportRichText = false;
+            body.alignment = TextAnchor.UpperLeft;
+            body.verticalOverflow = VerticalWrapMode.Overflow;
+            body.horizontalOverflow = HorizontalWrapMode.Overflow;
+            body.text = pageText;
+            RectTransform br = body.rectTransform;
+            br.anchorMin = br.anchorMax = new Vector2(0.5f, 0.5f);
+            br.sizeDelta = new Vector2(1060f, 310f);
+            br.anchoredPosition = new Vector2(0f, 38f);
+
+            float y = -150f;
+            const float step = 44f;
+            int n = 0;
+            if (kinds.Count > 1)
+            {
+                AddRow("Document", () => LegalTitle(kinds[legalDoc]), new Vector2(0f, y - step * n++), () => { legalDoc = (legalDoc + 1) % kinds.Count; legalPage = 0; },
+                    horizontal: d => { legalDoc = (legalDoc + kinds.Count + d) % kinds.Count; legalPage = 0; });
+            }
+            if (pages > 1)
+            {
+                AddRow("LegalPage", () => $"SEITE {legalPage + 1}/{pages}", new Vector2(0f, y - step * n++), () => legalPage = (legalPage + 1) % pages,
+                    horizontal: d => legalPage = (legalPage + pages + d) % pages);
+            }
+            if (legalConsent)
+            {
+                AddRow("Accept", () => "AKZEPTIEREN UND BEITRETEN", new Vector2(0f, y - step * n++), Session.AcceptConsent);
+                AddRow("Decline", () => "ABLEHNEN", new Vector2(0f, y - step * n++), () =>
+                {
+                    Session.DeclineConsent();
+                    Show(Page.Connect, 0);
+                });
+            }
+            else
+            {
+                AddRow("Back", () => "ZURÜCK", new Vector2(0f, y - step * n++), () => Show(Page.Rooms, 0));
+            }
+            PageFooter(legalConsent ? "MIT \"AKZEPTIEREN\" BESTÄTIGST DU, DIE DATENSCHUTZHINWEISE GELESEN ZU HABEN." : string.Empty);
+        }
+
+        /// <summary>The game's pixel font lacks a few characters common in legal texts.</summary>
+        private static string PixelFontSafe(string text)
+        {
+            return (text ?? string.Empty)
+                .Replace("§§", "Par.").Replace("§", "Par.")
+                .Replace("\u2013", "-").Replace("\u2014", "-")
+                .Replace("\u201E", "\"").Replace("\u201C", "\"").Replace("\u201D", "\"")
+                .Replace("\u2018", "'").Replace("\u2019", "'")
+                .Replace("\u2026", "...").Replace("\u00A0", " ");
+        }
+
+        /// <summary>Word wrap for the monospace pixel font.</summary>
+        private static List<string> Wrap(string text, int width)
+        {
+            var result = new List<string>();
+            foreach (string paragraph in PixelFontSafe(text).Replace("\r", string.Empty).Split('\n'))
+            {
+                string line = string.Empty;
+                foreach (string word in paragraph.Split(' '))
+                {
+                    string w = word;
+                    while (w.Length > width)
+                    {
+                        if (line.Length > 0)
+                        {
+                            result.Add(line);
+                            line = string.Empty;
+                        }
+                        result.Add(w.Substring(0, width));
+                        w = w.Substring(width);
+                    }
+                    if (line.Length == 0)
+                    {
+                        line = w;
+                    }
+                    else if (line.Length + 1 + w.Length <= width)
+                    {
+                        line += " " + w;
+                    }
+                    else
+                    {
+                        result.Add(line);
+                        line = w;
+                    }
+                }
+                result.Add(line);
+            }
+            return result;
         }
 
         private void OpenOnline()
@@ -401,7 +673,7 @@ namespace OGMultiplayer.Plugin
             switch (finished)
             {
                 case OnlineSetup.Purpose.Online:
-                    Show(Page.Connect, 4);
+                    Show(Page.Connect, 3);
                     break;
                 case OnlineSetup.Purpose.Bots:
                     Session.StartOffline(initials, Plugin.Character.Value);
@@ -446,8 +718,8 @@ namespace OGMultiplayer.Plugin
                 line.alignment = TextAnchor.MiddleLeft;
                 playerLines.Add(line);
             }
-            float c = -14f;
-            const float step = 48f;
+            float c = -10f;
+            float step = Session.IsHost && !Session.IsOffline ? 42f : 48f;
             int n = 0;
             if (!inMatch && Session.IsHost)
             {
@@ -473,6 +745,16 @@ namespace OGMultiplayer.Plugin
             if (!inMatch)
             {
                 AddPlayerRow(new Vector2(0f, c - step * n++), OnlineSetup.Purpose.ChangeInLobby);
+            }
+            if (!inMatch && Session.IsHost && !Session.IsOffline)
+            {
+                AddRow("RoomPassword", () => "RAUM-PASSWORT: " + (editing == Field.RoomPassword ? Mask(editBuffer) + Cursor() : Session.RoomLocked ? "AN" : "AUS"),
+                    new Vector2(0f, c - step * n++), () => BeginEdit(Field.RoomPassword), edit: Field.RoomPassword);
+                if (Session.Lobby.Any(p => p.Id != Session.MyId))
+                {
+                    AddRow("Kick", () => "ENTFERNEN: " + KickTargetName(), new Vector2(0f, c - step * n++), KickSelected,
+                        horizontal: d => kickIndex += d);
+                }
             }
             bool offline = Session.IsOffline;
             AddRow("Leave", () => offline ? "BEENDEN" : "RAUM VERLASSEN", new Vector2(0f, c - step * n++), LeaveLobby);
@@ -512,7 +794,7 @@ namespace OGMultiplayer.Plugin
                 Session.Toast("UNGÜLTIGER PORT.");
                 return;
             }
-            Session.Connect(host, p, room, initials, characters.Count > 0 ? characters[characterIndex].id : SelectedCharacter.DefaultId, password);
+            Session.Connect(host, p, string.Empty, initials, characters.Count > 0 ? characters[characterIndex].id : SelectedCharacter.DefaultId, password);
         }
 
         private void StartMatch()
@@ -529,7 +811,10 @@ namespace OGMultiplayer.Plugin
             {
                 return string.Empty;
             }
-            return $"{page}|{Session.Connected}|{Session.IsHost}|{Session.RoomState}|{Session.IsOffline}";
+            string rooms = page == Page.Rooms ? string.Join(",", Session.Rooms.Select(r => r.Name + r.Players + r.Locked + r.Running)) + "|" + roomsPage : string.Empty;
+            string legal = page == Page.Legal ? $"{legalDoc}|{legalPage}|{Session.Documents.Count}" : string.Empty;
+            string lobby = page == Page.Lobby ? string.Join(",", Session.Lobby.Select(p => p.Id)) : string.Empty;
+            return $"{page}|{Session.Connected}|{Session.IsHost}|{Session.RoomState}|{Session.IsOffline}|{Session.InRoom}|{rooms}|{legal}|{lobby}";
         }
 
         private void Refresh()
@@ -588,6 +873,14 @@ namespace OGMultiplayer.Plugin
                 }
             }
             UpdateShowcase();
+            if ((page == Page.Rooms || page == Page.CreateRoom) && footer != null)
+            {
+                footer.text = editing != Field.None ? EditHint() : (page == Page.Rooms ? "RAUM WÄHLEN ODER EIGENEN ERSTELLEN" : string.Empty);
+            }
+            if (page == Page.Rooms && statusLine != null)
+            {
+                statusLine.text = string.IsNullOrEmpty(Session.Motd) ? $"{Session.Rooms.Count} RÄUME" + (Session.MaxRooms > 0 ? $" (MAX. {Session.MaxRooms})" : string.Empty) : Session.Motd.ToUpperInvariant();
+            }
             if (page == Page.Connect && footer != null)
             {
                 footer.text = editing != Field.None ? EditHint() : (Session.LastError ?? string.Empty).ToUpperInvariant();
@@ -826,6 +1119,14 @@ namespace OGMultiplayer.Plugin
                 case Field.Room:
                     editBuffer = room ?? string.Empty;
                     break;
+                case Field.CreateName:
+                    editBuffer = createName ?? string.Empty;
+                    break;
+                case Field.CreatePassword:
+                case Field.JoinPassword:
+                case Field.RoomPassword:
+                    editBuffer = string.Empty;
+                    break;
             }
             Input.ResetInputAxes();
         }
@@ -852,6 +1153,21 @@ namespace OGMultiplayer.Plugin
                     break;
                 case Field.Room:
                     room = editBuffer.Trim().ToLowerInvariant();
+                    break;
+                case Field.CreateName:
+                    createName = editBuffer.Trim().ToLowerInvariant();
+                    break;
+                case Field.CreatePassword:
+                    createPassword = editBuffer;
+                    break;
+                case Field.JoinPassword:
+                    if (joinTarget != null && editBuffer.Length > 0)
+                    {
+                        Session.JoinRoom(joinTarget, editBuffer);
+                    }
+                    break;
+                case Field.RoomPassword:
+                    Session.SetRoomPassword(editBuffer);
                     break;
             }
             editing = Field.None;
@@ -899,9 +1215,13 @@ namespace OGMultiplayer.Plugin
                 case Field.Server:
                     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == ':' || c == '[' || c == ']';
                 case Field.Room:
+                case Field.CreateName:
                     char l = char.ToLowerInvariant(c);
                     return (l >= 'a' && l <= 'z') || (l >= '0' && l <= '9') || l == '-' || l == '_';
                 case Field.Password:
+                case Field.JoinPassword:
+                case Field.CreatePassword:
+                case Field.RoomPassword:
                     return c >= ' ' && c != '\u007f';
                 default:
                     return false;
@@ -910,7 +1230,7 @@ namespace OGMultiplayer.Plugin
 
         private static int MaxLength(Field field)
         {
-            return field == Field.Room ? 32 : 128;
+            return field == Field.Room || field == Field.CreateName ? 32 : 128;
         }
 
         // ------------------------------------------------------------------ input loop
@@ -955,10 +1275,39 @@ namespace OGMultiplayer.Plugin
                 return;
             }
             AttractDemoController.NotifyHotSeatActivity();
-            if (page == Page.Connect && Session.Connected && !Session.IsOffline)
+            if (page == Page.Connect && Session.NeedsConsent)
             {
-                // connected: continue in the lobby like the game moves on after a confirmation
+                // public server: imprint and privacy notice first
+                legalConsent = true;
+                legalDoc = 0;
+                legalPage = 0;
+                Show(Page.Legal, 0);
+                return;
+            }
+            if ((page == Page.Connect || (page == Page.Legal && legalConsent)) && Session.Connected && !Session.IsOffline)
+            {
+                // connected: continue in the room list (or the room, if HELLO named one)
+                Show(Session.InRoom ? Page.Lobby : Page.Rooms, 0);
+                return;
+            }
+            if (page == Page.Legal && legalConsent && !Session.Connected && !Session.Connecting)
+            {
+                Show(Page.Connect, 0);
+                return;
+            }
+            if ((page == Page.Rooms || page == Page.CreateRoom) && Session.InRoom)
+            {
                 Show(Page.Lobby, 0);
+                return;
+            }
+            if ((page == Page.Rooms || page == Page.CreateRoom || (page == Page.Legal && !legalConsent)) && !Session.Connected && !Session.Connecting)
+            {
+                Show(Page.Connect, 0);
+                return;
+            }
+            if (page == Page.Lobby && Session.Connected && !Session.InRoom && !Session.IsOffline)
+            {
+                Show(Page.Rooms, 0);
                 return;
             }
             if (page == Page.Lobby && !Session.Connected && !Session.Connecting)
@@ -1036,6 +1385,23 @@ namespace OGMultiplayer.Plugin
                     }
                     Show(Page.Choice, 1);
                     break;
+                case Page.Legal:
+                    if (legalConsent)
+                    {
+                        Session.DeclineConsent();
+                        Show(Page.Connect, 0);
+                    }
+                    else
+                    {
+                        Show(Page.Rooms, 0);
+                    }
+                    break;
+                case Page.Rooms:
+                    Disconnect();
+                    break;
+                case Page.CreateRoom:
+                    Show(Page.Rooms, 0);
+                    break;
                 default:
                     LeaveLobby();
                     break;
@@ -1045,9 +1411,21 @@ namespace OGMultiplayer.Plugin
         /// <summary>Leaving the lobby always ends the connection (or the bot game).</summary>
         private void LeaveLobby()
         {
-            bool offline = Session.IsOffline;
+            if (Session.IsOffline || !Session.Connected)
+            {
+                bool offline = Session.IsOffline;
+                Session.Disconnect();
+                Show(Page.Choice, offline ? 2 : 1);
+                return;
+            }
+            // online: back to the room list, still connected to the server
+            Session.LeaveRoom();
+        }
+
+        private void Disconnect()
+        {
             Session.Disconnect();
-            Show(Page.Choice, offline ? 2 : 1);
+            Show(Page.Choice, 1);
         }
 
         /// <summary>Runs a menu action once per frame, with the game's menu sound.</summary>

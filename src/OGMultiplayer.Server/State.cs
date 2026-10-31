@@ -15,7 +15,10 @@ public sealed class ServerState
 
     public List<BanEntry> Bans { get; set; } = new();
 
-    /// <summary>Password set with the admin command; null = use the configured password.</summary>
+    /// <summary>Key (Protocol.ServerKey) of the password set with the admin command; null = configured password.</summary>
+    public string? PasswordKeyOverride { get; set; }
+
+    /// <summary>Only read from old state files (plain text); converted to a key on load.</summary>
     public string? PasswordOverride { get; set; }
 
     /// <summary>Password switched off with the admin command (wins over the configured one).</summary>

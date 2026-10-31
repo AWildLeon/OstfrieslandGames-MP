@@ -12,12 +12,25 @@ namespace OGMultiplayer
     /// The first field is the command.
     ///
     /// Handshake: on connect the server sends CHALLENGE; the client answers with HELLO.
-    /// With a server password, proof = lowercase hex HMAC-SHA256(key: UTF-8 password,
-    /// message: nonce). The password itself never goes over the wire. Without a
-    /// password, proof is empty.
+    /// With a server password, proof = lowercase hex HMAC-SHA256(key: ServerKey(password),
+    /// message: nonce). Neither the password nor the key goes over the wire, and the server
+    /// only stores the key. Without a password, proof is empty.
+    ///
+    /// Rooms: after HELLO the client is on the server but in no room (room browser) unless
+    /// HELLO named a room. Room passwords never travel in clear text either: the room key is
+    /// PBKDF2-SHA256 of the room password salted with the room name (RoomKey), the join
+    /// proof is AuthProof(roomKey, nonce) with the same connection nonce. The server
+    /// password works the same way: proof = AuthProof(ServerKey(password), nonce).
     ///
     /// Client -> Server
-    ///   HELLO    version initials characterId room proof
+    ///   DOC      privacy | imprint | rules  (allowed before HELLO)
+    ///   HELLO    version initials characterId room proof consentHash
+    ///   ROOMS                               (ask for the room list)
+    ///   CREATE   room roomKey               (empty key = open room; creator becomes host)
+    ///   JOIN     room proof
+    ///   LEAVEROOM                           (back to the room browser)
+    ///   ROOMPW   roomKey                    (host: set/clear the room password)
+    ///   KICK     playerId                   (host: remove a player or bot from the room)
     ///   START    discipline                 (host only)
     ///   READY    matchId                    (client is waiting at the turn start)
     ///   LIVE     matchId score              (optional live score while playing)
@@ -28,8 +41,13 @@ namespace OGMultiplayer
     ///   PING
     ///
     /// Server -> Client
-    ///   CHALLENGE version nonce passwordRequired(0|1)
+    ///   CHALLENGE version nonce passwordRequired(0|1) public(0|1) privacyHash serverName
+    ///   DOCTEXT  kind text                  (text escaped with EscapeText)
     ///   WELCOME  playerId
+    ///   SERVERINFO name public(0|1) motd docs   (docs = comma list of available documents)
+    ///   ROOMLIST maxRooms room*             (room = name|players|max|state|locked|hostInitials)
+    ///   JOINED   room
+    ///   ROOMLEFT reason                     (back in the room browser)
     ///   ERROR    message
     ///   LOBBY    room hostId state botLevel player*  (player = id|INI|char|status|score|bot)
     ///   BEGIN    matchId discipline player* (player = id|INI|char)
@@ -46,7 +64,15 @@ namespace OGMultiplayer
         public const int MinPlayers = 2;
         public const int MaxPlayers = 4;
         public const int DisciplineCount = 5;
+        /// <summary>Longest line a client may send.</summary>
         public const int MaxLineLength = 4096;
+
+        /// <summary>Longest line a server may send (legal texts).</summary>
+        public const int MaxServerLineLength = 65536;
+
+        public const string DocPrivacy = "privacy";
+        public const string DocImprint = "imprint";
+        public const string DocRules = "rules";
 
         public const string Hello = "HELLO";
         public const string Start = "START";
@@ -56,6 +82,13 @@ namespace OGMultiplayer
         public const string Leave = "LEAVE";
         public const string Char = "CHAR";
         public const string Ping = "PING";
+        public const string Doc = "DOC";
+        public const string Rooms = "ROOMS";
+        public const string Create = "CREATE";
+        public const string JoinRoom = "JOIN";
+        public const string LeaveRoom = "LEAVEROOM";
+        public const string RoomPassword = "ROOMPW";
+        public const string KickPlayer = "KICK";
         public const string Bot = "BOT";
         public const string BotAdd = "ADD";
         public const string BotRemove = "REMOVE";
@@ -71,6 +104,11 @@ namespace OGMultiplayer
         public const string Pong = "PONG";
         public const string Msg = "MSG";
         public const string Bye = "BYE";
+        public const string DocText = "DOCTEXT";
+        public const string ServerInfo = "SERVERINFO";
+        public const string RoomList = "ROOMLIST";
+        public const string Joined = "JOINED";
+        public const string RoomLeft = "ROOMLEFT";
 
         public const string StatusLobby = "lobby";
         public const string StatusLoading = "loading";
@@ -135,6 +173,128 @@ namespace OGMultiplayer
                 }
                 return sb.ToString();
             }
+        }
+
+        /// <summary>PBKDF2 rounds for password keys; the server never learns the password itself.</summary>
+        public const int KeyIterations = 30000;
+
+        /// <summary>
+        /// Room key from a room password: hex PBKDF2-SHA256(password, salt "ogmp-room:" + room).
+        /// The room name as salt means equal passwords give different keys in different rooms.
+        /// Empty password = empty key (open room).
+        /// </summary>
+        public static string RoomKey(string password, string room)
+        {
+            return string.IsNullOrEmpty(password) ? string.Empty : DeriveKey(password, "ogmp-room:" + (room ?? string.Empty));
+        }
+
+        /// <summary>Server key from the server password; the server only keeps this key.</summary>
+        public static string ServerKey(string password)
+        {
+            return string.IsNullOrEmpty(password) ? string.Empty : DeriveKey(password, "ogmp-server:v1");
+        }
+
+        private static string DeriveKey(string password, string salt)
+        {
+            return Hex(Pbkdf2Sha256(Encoding.UTF8.GetBytes(password), Encoding.UTF8.GetBytes(salt), KeyIterations));
+        }
+
+        /// <summary>
+        /// PBKDF2-HMAC-SHA256 (RFC 8018), one 32-byte block. Written out because the game's Mono
+        /// runtime does not honour the hash algorithm argument of Rfc2898DeriveBytes.
+        /// </summary>
+        public static byte[] Pbkdf2Sha256(byte[] password, byte[] salt, int iterations)
+        {
+            using (var hmac = new System.Security.Cryptography.HMACSHA256(password))
+            {
+                var block = new byte[salt.Length + 4];
+                Buffer.BlockCopy(salt, 0, block, 0, salt.Length);
+                block[block.Length - 1] = 1; // INT(1), big endian
+                byte[] u = hmac.ComputeHash(block);
+                var result = (byte[])u.Clone();
+                for (int i = 1; i < iterations; i++)
+                {
+                    u = hmac.ComputeHash(u);
+                    for (int j = 0; j < result.Length; j++)
+                    {
+                        result[j] ^= u[j];
+                    }
+                }
+                return result;
+            }
+        }
+
+        /// <summary>Short fingerprint of a document, used to remember which version was accepted.</summary>
+        public static string TextHash(string text)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                return Hex(sha.ComputeHash(Encoding.UTF8.GetBytes(text ?? string.Empty))).Substring(0, 16);
+            }
+        }
+
+        private static string Hex(byte[] bytes)
+        {
+            var sb = new StringBuilder(bytes.Length * 2);
+            foreach (byte b in bytes)
+            {
+                sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>Makes multi-line text fit into one field (backslash, tab and newline escaped).</summary>
+        public static string EscapeText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+            var sb = new StringBuilder(text.Length + 16);
+            foreach (char c in text)
+            {
+                switch (c)
+                {
+                    case '\\':
+                        sb.Append("\\\\");
+                        break;
+                    case '\t':
+                        sb.Append("\\t");
+                        break;
+                    case '\n':
+                        sb.Append("\\n");
+                        break;
+                    case '\r':
+                        break;
+                    default:
+                        sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
+        }
+
+        public static string UnescapeText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+            var sb = new StringBuilder(text.Length);
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c == '\\' && i + 1 < text.Length)
+                {
+                    char n = text[++i];
+                    sb.Append(n == 'n' ? '\n' : n == 't' ? '\t' : n);
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
         }
 
         public static string Int(int value)

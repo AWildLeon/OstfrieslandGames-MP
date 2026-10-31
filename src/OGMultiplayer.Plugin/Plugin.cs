@@ -20,6 +20,7 @@ namespace OGMultiplayer.Plugin
         internal static ConfigEntry<int> ServerPort;
         internal static ConfigEntry<string> RoomName;
         internal static ConfigEntry<string> ServerPassword;
+        internal static ConfigEntry<string> AcceptedPrivacy;
         internal static ConfigEntry<string> Initials;
         internal static ConfigEntry<string> Character;
         internal static ConfigEntry<KeyCode> ToggleKey;
@@ -34,6 +35,7 @@ namespace OGMultiplayer.Plugin
             ServerHost = Config.Bind("Server", "Host", "127.0.0.1", "Hostname oder IP des OGMultiplayer-Servers.");
             ServerPort = Config.Bind("Server", "Port", OGMultiplayer.Protocol.DefaultPort, "TCP-Port des Servers.");
             ServerPassword = Config.Bind("Server", "Password", "", "Server-Passwort (leer = offener Server). Wird im Klartext in dieser Datei gespeichert, aber nie im Klartext uebertragen.");
+            AcceptedPrivacy = Config.Bind("Server", "AcceptedPrivacy", "", "Akzeptierte Datenschutzhinweise je Server (host:port=Fassung). Leeren, um erneut gefragt zu werden.");
             RoomName = Config.Bind("Server", "Room", "ostfriesland", "Raumname; alle Mitspieler muessen denselben Raum nutzen.");
             Initials = Config.Bind("Player", "Initials", "", "Deine drei Initialen (A-Z).");
             Character = Config.Bind("Player", "Character", "tim", "Figur-ID.");

@@ -1,0 +1,17 @@
+IMPRESSUM
+
+Angaben gemäß § 5 DDG
+
+[Vorname Nachname]
+[Straße Hausnummer]
+[PLZ Ort]
+[Land]
+
+Kontakt
+E-Mail: [kontakt@example.org]
+
+Verantwortlich für den Inhalt: [Vorname Nachname], Anschrift wie oben.
+
+Dieser Server ist ein privat betriebener Fan-Server für einen inoffiziellen
+Mehrspieler-Mod von "Ostfriesland Games". Er steht in keiner Verbindung zu den
+Entwicklern oder Rechteinhabern des Spiels.

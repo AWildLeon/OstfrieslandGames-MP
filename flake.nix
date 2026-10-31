@@ -114,6 +114,56 @@
                 Wird per systemd LoadCredential eingelesen und landet nicht im Nix-Store.
               '';
             };
+            public = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Öffentlicher Server: Impressum und Datenschutzhinweise sind Pflicht und werden
+                Spielern vor dem Beitritt angezeigt (Zustimmung nötig); Raum- und Verbindungs-
+                limits, gekürzte IPs im Log. Vorlagen: docs/legal/ im Repo.
+              '';
+            };
+            serverName = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              example = "Moin-Server";
+              description = "Name in der Raumliste.";
+            };
+            motd = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Nachricht in der Raumliste.";
+            };
+            imprintFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              description = "Impressum (Textdatei). Pflicht bei public.";
+            };
+            privacyFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              description = "Datenschutzhinweise (Textdatei). Pflicht bei public.";
+            };
+            rulesFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              description = "Regeln/Nutzungsbedingungen (Textdatei, optional).";
+            };
+            maxRooms = lib.mkOption {
+              type = lib.types.nullOr lib.types.ints.unsigned;
+              default = null;
+              description = "Maximale Raumanzahl (0 = unbegrenzt). Standard: 50 bei public, sonst unbegrenzt.";
+            };
+            maxConnectionsPerIp = lib.mkOption {
+              type = lib.types.nullOr lib.types.ints.unsigned;
+              default = null;
+              description = "Verbindungen pro IP (0 = unbegrenzt). Standard: 3 bei public, sonst unbegrenzt.";
+            };
+            logIps = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Volle IP-Adressen ins Log schreiben (bei public sonst gekürzt).";
+            };
             extraArgs = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [ ];
@@ -133,9 +183,22 @@
                   [ (lib.getExe cfg.package) "--port" (toString cfg.port) "--bind" cfg.bind
                     "--state-file" "/var/lib/ogmultiplayer/state.json" "--no-console" ]
                   ++ lib.optionals (cfg.passwordFile != null) [ "--password-file" "%d/password" ]
+                  ++ lib.optional cfg.public "--public"
+                  ++ lib.optionals (cfg.serverName != null) [ "--name" cfg.serverName ]
+                  ++ lib.optionals (cfg.motd != null) [ "--motd" cfg.motd ]
+                  ++ lib.optionals (cfg.imprintFile != null) [ "--imprint-file" "%d/imprint" ]
+                  ++ lib.optionals (cfg.privacyFile != null) [ "--privacy-file" "%d/privacy" ]
+                  ++ lib.optionals (cfg.rulesFile != null) [ "--rules-file" "%d/rules" ]
+                  ++ lib.optionals (cfg.maxRooms != null) [ "--max-rooms" (toString cfg.maxRooms) ]
+                  ++ lib.optionals (cfg.maxConnectionsPerIp != null) [ "--max-per-ip" (toString cfg.maxConnectionsPerIp) ]
+                  ++ lib.optional cfg.logIps "--log-ips"
                   ++ cfg.extraArgs
                 );
-                LoadCredential = lib.mkIf (cfg.passwordFile != null) [ "password:${cfg.passwordFile}" ];
+                LoadCredential =
+                  lib.optional (cfg.passwordFile != null) "password:${cfg.passwordFile}"
+                  ++ lib.optional (cfg.imprintFile != null) "imprint:${cfg.imprintFile}"
+                  ++ lib.optional (cfg.privacyFile != null) "privacy:${cfg.privacyFile}"
+                  ++ lib.optional (cfg.rulesFile != null) "rules:${cfg.rulesFile}";
                 DynamicUser = true;
                 # bans and admin password changes (state.json)
                 StateDirectory = "ogmultiplayer";

@@ -16,6 +16,16 @@ namespace OGMultiplayer.Plugin
         public bool IsBot;
     }
 
+    internal sealed class RoomInfo
+    {
+        public string Name;
+        public int Players;
+        public int Max;
+        public bool Running;
+        public bool Locked;
+        public string Host;
+    }
+
     /// <summary>
     /// Online match = a hot seat match where every machine plays its own turn at the same
     /// time. The local player is always slot 1 of the local HotSeatMatch; remote players'
@@ -130,7 +140,8 @@ namespace OGMultiplayer.Plugin
         {
             Disconnect();
             string ini = Protocol.NormalizeInitials(initials);
-            string roomId = Protocol.NormalizeId(room);
+            // empty room = log in to the room browser
+            string roomId = string.IsNullOrWhiteSpace(room) ? string.Empty : Protocol.NormalizeId(room);
             string charId = Protocol.NormalizeId(character);
             if (ini == null)
             {
@@ -156,6 +167,7 @@ namespace OGMultiplayer.Plugin
             Connecting = true;
             pendingHello = new[] { ini, charId, roomId };
             pendingPassword = password ?? string.Empty;
+            endpoint = host.Trim().ToLowerInvariant() + ":" + port;
             var client = new NetClient();
             net = client;
             client.Connect(host.Trim(), port);
@@ -216,17 +228,165 @@ namespace OGMultiplayer.Plugin
                 FailConnect($"Server nutzt Protokoll v{f.ElementAtOrDefault(1)}, Mod v{Protocol.Version}. Bitte aktualisieren.");
                 return;
             }
-            string nonce = f.ElementAtOrDefault(2) ?? string.Empty;
+            nonce = f.ElementAtOrDefault(2) ?? string.Empty;
             bool required = f.ElementAtOrDefault(3) == "1";
             if (required && string.IsNullOrEmpty(pendingPassword))
             {
                 FailConnect("Der Server verlangt ein Passwort.");
                 return;
             }
-            string proof = required ? Protocol.AuthProof(pendingPassword, nonce) : string.Empty;
-            Send(Protocol.Hello, Protocol.Int(Protocol.Version), pendingHello[0], pendingHello[1], pendingHello[2], proof);
+            pendingProof = required ? Protocol.AuthProof(Protocol.ServerKey(pendingPassword), nonce) : string.Empty;
+            IsPublicServer = f.ElementAtOrDefault(4) == "1";
+            PrivacyHash = f.ElementAtOrDefault(5) ?? string.Empty;
+            ServerName = f.ElementAtOrDefault(6) ?? string.Empty;
+            if (IsPublicServer && PrivacyHash.Length > 0 && AcceptedHash() != PrivacyHash)
+            {
+                // public server: show imprint and privacy notice and wait for the player's consent
+                NeedsConsent = true;
+                RequestDocument(Protocol.DocPrivacy);
+                RequestDocument(Protocol.DocImprint);
+                RequestDocument(Protocol.DocRules);
+                return;
+            }
+            SendHello();
+        }
+
+        private string pendingProof;
+        private string endpoint = string.Empty;
+
+        private void SendHello()
+        {
+            if (pendingHello == null)
+            {
+                return;
+            }
+            Send(Protocol.Hello, Protocol.Int(Protocol.Version), pendingHello[0], pendingHello[1], pendingHello[2], pendingProof ?? string.Empty, PrivacyHash ?? string.Empty);
             pendingHello = null;
             pendingPassword = null;
+            pendingProof = null;
+        }
+
+        /// <summary>The player accepted the privacy notice of a public server.</summary>
+        public void AcceptConsent()
+        {
+            if (!NeedsConsent)
+            {
+                return;
+            }
+            NeedsConsent = false;
+            var entries = ConsentEntries();
+            entries[endpoint] = PrivacyHash;
+            Plugin.AcceptedPrivacy.Value = string.Join(";", entries.Select(kv => kv.Key + "=" + kv.Value));
+            Plugin.Log.LogInfo($"Datenschutzhinweise von {endpoint} akzeptiert (Fassung {PrivacyHash})");
+            SendHello();
+        }
+
+        public void DeclineConsent()
+        {
+            LastError = "Ohne Zustimmung kein Beitritt.";
+            Disconnect();
+        }
+
+        private string AcceptedHash()
+        {
+            return ConsentEntries().TryGetValue(endpoint, out string hash) ? hash : null;
+        }
+
+        private static Dictionary<string, string> ConsentEntries()
+        {
+            var result = new Dictionary<string, string>();
+            foreach (string entry in (Plugin.AcceptedPrivacy.Value ?? string.Empty).Split(';'))
+            {
+                int eq = entry.LastIndexOf('=');
+                if (eq > 0)
+                {
+                    result[entry.Substring(0, eq)] = entry.Substring(eq + 1);
+                }
+            }
+            return result;
+        }
+
+        // ------------------------------------------------------------------ server info, legal texts, rooms
+
+        public string ServerName { get; private set; } = string.Empty;
+        public bool IsPublicServer { get; private set; }
+        public string PrivacyHash { get; private set; } = string.Empty;
+        public string Motd { get; private set; } = string.Empty;
+        public bool NeedsConsent { get; private set; }
+        public bool InRoom { get; private set; }
+        public bool RoomLocked { get; private set; }
+        public int MaxRooms { get; private set; }
+        public List<RoomInfo> Rooms { get; } = new List<RoomInfo>();
+        public List<string> AvailableDocuments { get; } = new List<string>();
+
+        /// <summary>Legal texts received from the server, by kind (privacy, imprint, rules).</summary>
+        public Dictionary<string, string> Documents { get; } = new Dictionary<string, string>();
+
+        public void RequestDocument(string kind)
+        {
+            if (net != null && !Documents.ContainsKey(kind))
+            {
+                Send(Protocol.Doc, kind);
+            }
+        }
+
+        public void RequestRooms() => Send(Protocol.Rooms);
+
+        public void CreateRoom(string name, string password)
+        {
+            string id = Protocol.NormalizeId(name);
+            if (id == null)
+            {
+                Toast("Raumname: 1-32 Zeichen a-z, 0-9, - oder _.");
+                return;
+            }
+            Send(Protocol.Create, id, Protocol.RoomKey(password, id));
+        }
+
+        public void JoinRoom(string name, string password)
+        {
+            string proof = string.IsNullOrEmpty(password) ? string.Empty : Protocol.AuthProof(Protocol.RoomKey(password, name), nonce ?? string.Empty);
+            Send(Protocol.JoinRoom, name, proof);
+        }
+
+        public void LeaveRoom() => Send(Protocol.LeaveRoom);
+
+        public void SetRoomPassword(string password)
+        {
+            if (!IsHost)
+            {
+                Toast($"Nur der Host ({HostInitials()}) kann das Raum-Passwort ändern.");
+                return;
+            }
+            Send(Protocol.RoomPassword, Protocol.RoomKey(password, RoomName));
+        }
+
+        public void KickPlayer(int id)
+        {
+            if (IsHost)
+            {
+                Send(Protocol.KickPlayer, Protocol.Int(id));
+            }
+        }
+
+        private string nonce;
+
+        private void HandleRoomList(string[] f)
+        {
+            Protocol.TryInt(f.ElementAtOrDefault(1), out int max);
+            MaxRooms = max;
+            Rooms.Clear();
+            for (int i = 2; i < f.Length; i++)
+            {
+                string[] p = Protocol.SplitPart(f[i]);
+                if (p.Length < 6)
+                {
+                    continue;
+                }
+                Protocol.TryInt(p[1], out int players);
+                Protocol.TryInt(p[2], out int capacity);
+                Rooms.Add(new RoomInfo { Name = p[0], Players = players, Max = capacity, Running = p[3] == Protocol.StateMatch, Locked = p[4] == "1", Host = p[5] });
+            }
         }
 
         private void FailConnect(string message)
@@ -251,6 +411,14 @@ namespace OGMultiplayer.Plugin
 
         private void ResetConnectionState()
         {
+            NeedsConsent = false;
+            InRoom = false;
+            RoomLocked = false;
+            Rooms.Clear();
+            Documents.Clear();
+            AvailableDocuments.Clear();
+            Motd = string.Empty;
+            nonce = null;
             ReturnToLobby = false;
             pendingHello = null;
             pendingPassword = null;
@@ -309,6 +477,10 @@ namespace OGMultiplayer.Plugin
             {
                 return "VERBINDE " + dots;
             }
+            if (!InRoom)
+            {
+                return brief ? "RAUMLISTE" : "IN DER RAUMLISTE";
+            }
             if (RoomState == Protocol.StateMatch)
             {
                 return "RUNDE LÄUFT " + dots;
@@ -348,7 +520,7 @@ namespace OGMultiplayer.Plugin
                         Plugin.Log.LogError($"Fehler bei Nachricht '{line}': {ex}");
                     }
                 }
-                if (net != null && Connected && Time.unscaledTime - lastPing > 5f)
+                if (net != null && (Connected || Connecting) && Time.unscaledTime - lastPing > 5f)
                 {
                     lastPing = Time.unscaledTime;
                     Send(Protocol.Ping);
@@ -429,6 +601,41 @@ namespace OGMultiplayer.Plugin
                     LastError = null;
                     Plugin.Log.LogInfo($"Verbunden, Spieler-ID {id}");
                     break;
+                case Protocol.ServerInfo:
+                    ServerName = f.ElementAtOrDefault(1) ?? ServerName;
+                    IsPublicServer = f.ElementAtOrDefault(2) == "1";
+                    Motd = f.ElementAtOrDefault(3) ?? string.Empty;
+                    AvailableDocuments.Clear();
+                    AvailableDocuments.AddRange((f.ElementAtOrDefault(4) ?? string.Empty).Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
+                    break;
+                case Protocol.DocText:
+                    if (f.Length > 2 && !string.IsNullOrEmpty(f[2]))
+                    {
+                        Documents[f[1]] = Protocol.UnescapeText(f[2]);
+                        if (!AvailableDocuments.Contains(f[1]))
+                        {
+                            AvailableDocuments.Add(f[1]);
+                        }
+                    }
+                    break;
+                case Protocol.RoomList:
+                    HandleRoomList(f);
+                    break;
+                case Protocol.Joined:
+                    InRoom = true;
+                    RoomName = f.ElementAtOrDefault(1) ?? RoomName;
+                    break;
+                case Protocol.RoomLeft:
+                    InRoom = false;
+                    Lobby.Clear();
+                    RoomState = Protocol.StateLobby;
+                    if (OnlineControllerActive)
+                    {
+                        HotSeatFlowController.AbortToMenu();
+                    }
+                    Toast(f.ElementAtOrDefault(1) ?? "Raum verlassen.");
+                    RequestRooms();
+                    break;
                 case Protocol.Error:
                     LastError = f.ElementAtOrDefault(1) ?? "Fehler";
                     Toast(LastError);
@@ -473,8 +680,10 @@ namespace OGMultiplayer.Plugin
             {
                 BotLevel = level;
             }
+            RoomLocked = f.ElementAtOrDefault(5) == "1";
+            InRoom = true;
             Lobby.Clear();
-            for (int i = 5; i < f.Length; i++)
+            for (int i = 6; i < f.Length; i++)
             {
                 string[] p = Protocol.SplitPart(f[i]);
                 if (p.Length < 5 || !Protocol.TryInt(p[0], out int pid))

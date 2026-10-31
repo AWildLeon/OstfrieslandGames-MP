@@ -31,6 +31,29 @@ public sealed class ServerOptions
     /// <summary>JSON file for bans and admin password changes; null = nothing persists.</summary>
     public string? StateFile { get; set; }
 
+    /// <summary>Public server: legal texts required, consent before joining, stricter limits.</summary>
+    public bool Public { get; set; }
+
+    public string ServerName { get; set; } = "Ostfriesland Games Server";
+
+    /// <summary>Message of the day, shown in the room browser.</summary>
+    public string? Motd { get; set; }
+
+    public string? ImprintFile { get; set; }
+    public string? PrivacyFile { get; set; }
+    public string? RulesFile { get; set; }
+
+    /// <summary>0 = unlimited.</summary>
+    public int MaxRooms { get; set; }
+
+    /// <summary>Simultaneous connections per IP address; 0 = unlimited.</summary>
+    public int MaxConnectionsPerIp { get; set; }
+
+    /// <summary>Write full IP addresses to the log (otherwise the last part is masked).</summary>
+    public bool LogIps { get; set; } = true;
+
+    public int MaxLinesPerSecond { get; set; } = 30;
+
     /// <summary>Read admin commands from stdin.</summary>
     public bool Console { get; set; } = true;
 }
@@ -46,6 +69,9 @@ public sealed partial class GameServer
     private ServerState state = new();
     private readonly DateTime startedAt = DateTime.UtcNow;
     private CancellationTokenSource shutdown = new();
+    private readonly Dictionary<string, string> documents = new(StringComparer.Ordinal);
+    private string privacyHash = string.Empty;
+    private string lastRoomList = string.Empty;
     private int nextClientId;
     private int nextMatchId;
 
@@ -66,7 +92,13 @@ public sealed partial class GameServer
     {
         shutdown = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
         CancellationToken token = shutdown.Token;
+        if (!string.IsNullOrEmpty(options.Password))
+        {
+            configuredKey = Protocol.ServerKey(options.Password);
+            options.Password = null;
+        }
         LoadState();
+        LoadDocuments();
         var listener = new TcpListener(options.Bind, options.Port);
         listener.Start();
         BoundPort = ((IPEndPoint)listener.LocalEndpoint).Port;
@@ -100,6 +132,12 @@ public sealed partial class GameServer
                     tcp.Close();
                     continue;
                 }
+                if (ip != null && options.MaxConnectionsPerIp > 0
+                    && clients.Count(c => c.Address.Equals(ServerState.Normalize(ip))) >= options.MaxConnectionsPerIp)
+                {
+                    tcp.Close();
+                    continue;
+                }
                 if (clients.Count >= options.MaxConnections)
                 {
                     tcp.Close();
@@ -123,9 +161,13 @@ public sealed partial class GameServer
     }
 
     /// <summary>Admin override from the state file, otherwise the configured password.</summary>
-    private string? EffectivePassword => state.PasswordDisabled ? null : state.PasswordOverride ?? options.Password;
+    /// <summary>Key derived from the configured password; the password itself is not kept.</summary>
+    private string? configuredKey;
 
-    private bool PasswordRequired => !string.IsNullOrEmpty(EffectivePassword);
+    /// <summary>Admin override from the state file, otherwise the configured password (both as keys).</summary>
+    private string? EffectiveKey => state.PasswordDisabled ? null : state.PasswordKeyOverride ?? configuredKey;
+
+    private bool PasswordRequired => !string.IsNullOrEmpty(EffectiveKey);
 
     private void LoadState()
     {
@@ -134,9 +176,16 @@ public sealed partial class GameServer
             return;
         }
         state = ServerState.Load(options.StateFile);
+        if (!string.IsNullOrEmpty(state.PasswordOverride))
+        {
+            // older state files kept the admin password in clear text
+            state.PasswordKeyOverride = Protocol.ServerKey(state.PasswordOverride);
+            state.PasswordOverride = null;
+            SaveState();
+        }
         bans = state.Bans.ToDictionary(b => ServerState.Normalize(IPAddress.Parse(b.Ip)));
         Log($"State geladen: {options.StateFile} ({bans.Count} Bans"
-            + (state.PasswordDisabled ? ", Passwort per Admin abgeschaltet" : state.PasswordOverride != null ? ", Passwort per Admin gesetzt" : string.Empty) + ")");
+            + (state.PasswordDisabled ? ", Passwort per Admin abgeschaltet" : state.PasswordKeyOverride != null ? ", Passwort per Admin gesetzt" : string.Empty) + ")");
     }
 
     /// <summary>Persists bans and password changes. Runs under <c>sync</c>.</summary>
@@ -152,8 +201,9 @@ public sealed partial class GameServer
 
     private async Task ServeAsync(Client client, CancellationToken token)
     {
-        Log($"#{client.Id} connected from {client.Remote}");
-        client.Send(Protocol.Encode(Protocol.Challenge, Protocol.Int(Protocol.Version), client.Nonce, PasswordRequired ? "1" : "0"));
+        Log($"#{client.Id} connected from {LogAddress(client)}");
+        client.Send(Protocol.Encode(Protocol.Challenge, Protocol.Int(Protocol.Version), client.Nonce, PasswordRequired ? "1" : "0",
+            options.Public ? "1" : "0", privacyHash, options.ServerName));
         // not bound to the shutdown token so a final BYE still gets flushed
         var writer = Task.Run(() => client.WriteLoopAsync(CancellationToken.None));
         try
@@ -168,8 +218,21 @@ public sealed partial class GameServer
                 }
                 lock (sync)
                 {
-                    client.LastSeen = DateTime.UtcNow;
-                    Handle(client, Protocol.Decode(line));
+                    DateTime now = DateTime.UtcNow;
+                    client.LastSeen = now;
+                    if (now - client.RateWindowStart >= TimeSpan.FromSeconds(1))
+                    {
+                        client.RateWindowStart = now;
+                        client.RateCount = 0;
+                    }
+                    if (++client.RateCount > options.MaxLinesPerSecond)
+                    {
+                        Kick(client, "Zu viele Nachrichten.");
+                    }
+                    else
+                    {
+                        Handle(client, Protocol.Decode(line));
+                    }
                 }
                 if (client.Closing)
                 {
@@ -259,7 +322,7 @@ public sealed partial class GameServer
                 Disconnect(c, "timeout");
                 c.Close();
             }
-            else if (c.Room == null && !c.Closing && now - c.ConnectedAt > options.HandshakeTimeout)
+            else if (!c.Authed && !c.Closing && now - c.ConnectedAt > (c.ReadingDocuments ? TimeSpan.FromMinutes(15) : options.HandshakeTimeout))
             {
                 Disconnect(c, "no handshake");
                 c.Close();
@@ -310,15 +373,40 @@ public sealed partial class GameServer
             client.Send(Protocol.Encode(Protocol.Pong));
             return;
         }
+        if (cmd == Protocol.Doc)
+        {
+            HandleDoc(client, f);
+            return;
+        }
         if (cmd == Protocol.Hello)
         {
             HandleHello(client, f);
             return;
         }
+        if (!client.Authed)
+        {
+            client.Send(Protocol.Encode(Protocol.Error, "Nicht angemeldet."));
+            return;
+        }
+        switch (cmd)
+        {
+            case Protocol.Rooms:
+                client.Send(RoomListLine());
+                return;
+            case Protocol.Create:
+                HandleCreate(client, f);
+                return;
+            case Protocol.JoinRoom:
+                HandleJoin(client, f);
+                return;
+        }
         Room? room = client.Room;
         if (room == null)
         {
-            client.Send(Protocol.Encode(Protocol.Error, "Nicht angemeldet."));
+            if (cmd == Protocol.Char && f.Length > 1 && Protocol.NormalizeId(f[1]) is string id)
+            {
+                client.Character = id;
+            }
             return;
         }
         switch (cmd)
@@ -344,12 +432,92 @@ public sealed partial class GameServer
             case Protocol.Bot:
                 HandleBot(client, room, f);
                 break;
+            case Protocol.LeaveRoom:
+                LeaveRoom(client, "Raum verlassen.", notify: true);
+                break;
+            case Protocol.RoomPassword:
+                HandleRoomPassword(client, room, f);
+                break;
+            case Protocol.KickPlayer:
+                HandleKick(client, room, f);
+                break;
         }
     }
 
+    // ------------------------------------------------------------------ legal texts
+
+    private void LoadDocuments()
+    {
+        documents.Clear();
+        void Load(string kind, string? path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+            string text = File.ReadAllText(path).Replace("\r\n", "\n").Trim();
+            if (text.Length == 0)
+            {
+                throw new InvalidDataException($"Datei '{path}' ist leer.");
+            }
+            if (Protocol.EscapeText(text).Length > Protocol.MaxServerLineLength - 64)
+            {
+                throw new InvalidDataException($"Datei '{path}' ist zu lang (max. ca. 60 000 Zeichen).");
+            }
+            documents[kind] = text;
+        }
+        Load(Protocol.DocImprint, options.ImprintFile);
+        Load(Protocol.DocPrivacy, options.PrivacyFile);
+        Load(Protocol.DocRules, options.RulesFile);
+        if (options.Public && (!documents.ContainsKey(Protocol.DocImprint) || !documents.ContainsKey(Protocol.DocPrivacy)))
+        {
+            throw new InvalidDataException("Ein Public-Server braucht --imprint-file und --privacy-file (Impressum und Datenschutzhinweise).");
+        }
+        privacyHash = documents.TryGetValue(Protocol.DocPrivacy, out string? privacy) ? Protocol.TextHash(privacy) : string.Empty;
+        if (documents.Count > 0)
+        {
+            Log("Rechtstexte geladen: " + string.Join(", ", documents.Keys) + (privacyHash.Length > 0 ? $" (Datenschutz-Fassung {privacyHash})" : string.Empty));
+        }
+    }
+
+    private void HandleDoc(Client client, string[] f)
+    {
+        string kind = f.Length > 1 ? f[1] : string.Empty;
+        client.ReadingDocuments = true;
+        if (!documents.TryGetValue(kind, out string? text))
+        {
+            client.Send(Protocol.Encode(Protocol.DocText, kind, string.Empty));
+            return;
+        }
+        client.Send(Protocol.Encode(Protocol.DocText, kind, Protocol.EscapeText(text)));
+    }
+
+    private string DocumentList() => string.Join(",", documents.Keys.OrderBy(k => k));
+
+    /// <summary>IP for the log; masked on public servers unless --log-ips.</summary>
+    private string LogAddress(Client client)
+    {
+        if (options.LogIps)
+        {
+            return client.Remote;
+        }
+        byte[] bytes = client.Address.GetAddressBytes();
+        if (bytes.Length == 4)
+        {
+            return $"{bytes[0]}.{bytes[1]}.{bytes[2]}.x";
+        }
+        if (bytes.Length == 16)
+        {
+            return $"{bytes[0]:x2}{bytes[1]:x2}:{bytes[2]:x2}{bytes[3]:x2}:{bytes[4]:x2}{bytes[5]:x2}::x";
+        }
+        return "?";
+    }
+
+    // ------------------------------------------------------------------ login and rooms
+
     private void HandleHello(Client client, string[] f)
     {
-        if (client.Room != null)
+        if (client.Authed)
         {
             return;
         }
@@ -360,55 +528,273 @@ public sealed partial class GameServer
         }
         if (PasswordRequired)
         {
-            DateTime now = DateTime.UtcNow;
-            if (authFailures.TryGetValue(client.Address, out List<DateTime>? failures)
-                && failures.Count(t => now - t <= options.AuthFailureWindow) >= options.MaxAuthFailures)
+            if (Locked(client))
             {
                 Reject(client, "Zu viele falsche Passwörter. Bitte später erneut versuchen.");
                 return;
             }
             if (!ProofMatches(client.Nonce, f[5]))
             {
-                if (failures == null)
-                {
-                    failures = new List<DateTime>();
-                    authFailures[client.Address] = failures;
-                }
-                failures.Add(now);
-                Log($"#{client.Id} wrong password from {client.Address}");
+                RecordFailure(client);
+                Log($"#{client.Id} wrong password from {LogAddress(client)}");
                 Reject(client, "Falsches Server-Passwort.");
                 return;
             }
         }
+        if (options.Public && privacyHash.Length > 0 && (f.Length < 7 || f[6] != privacyHash))
+        {
+            Reject(client, "Bitte zuerst die Datenschutzhinweise des Servers lesen und akzeptieren.");
+            return;
+        }
         string? initials = Protocol.NormalizeInitials(f[2]);
         string? character = Protocol.NormalizeId(f[3]);
-        string? roomName = Protocol.NormalizeId(f[4]);
+        string roomField = f[4].Trim();
+        string? roomName = roomField.Length == 0 ? string.Empty : Protocol.NormalizeId(roomField);
         if (initials == null || character == null || roomName == null)
         {
             Reject(client, "Ungültige Initialen, Figur oder Raumname.");
             return;
         }
-        if (!rooms.TryGetValue(roomName, out Room? room))
-        {
-            room = new Room(roomName);
-            rooms[roomName] = room;
-        }
-        if (room.Members.Count >= Protocol.MaxPlayers)
-        {
-            if (room.Members.Count == 0)
-            {
-                rooms.Remove(roomName);
-            }
-            Reject(client, $"Raum '{roomName}' ist voll ({Protocol.MaxPlayers} Spieler).");
-            return;
-        }
         client.Initials = initials;
         client.Character = character;
+        client.Authed = true;
+        Log($"#{client.Id} logged in as {initials} ({character})" + (options.Public && privacyHash.Length > 0 ? $", Datenschutz {privacyHash} akzeptiert" : string.Empty));
+        client.Send(Protocol.Encode(Protocol.Welcome, Protocol.Int(client.Id)));
+        client.Send(Protocol.Encode(Protocol.ServerInfo, options.ServerName, options.Public ? "1" : "0", options.Motd ?? string.Empty, DocumentList()));
+        if (roomName.Length == 0)
+        {
+            client.Send(RoomListLine());
+            return;
+        }
+        // quick join by name (also creates the room), as in older clients
+        if (rooms.TryGetValue(roomName, out Room? existing))
+        {
+            if (existing.Locked)
+            {
+                client.Send(Protocol.Encode(Protocol.Error, $"Raum '{roomName}' ist passwortgeschützt."));
+                client.Send(RoomListLine());
+                return;
+            }
+            JoinRoom(client, existing);
+        }
+        else
+        {
+            CreateRoom(client, roomName, string.Empty);
+        }
+    }
+
+    private bool Locked(Client client)
+    {
+        DateTime now = DateTime.UtcNow;
+        return authFailures.TryGetValue(client.Address, out List<DateTime>? failures)
+            && failures.Count(t => now - t <= options.AuthFailureWindow) >= options.MaxAuthFailures;
+    }
+
+    private void RecordFailure(Client client)
+    {
+        if (!authFailures.TryGetValue(client.Address, out List<DateTime>? failures))
+        {
+            failures = new List<DateTime>();
+            authFailures[client.Address] = failures;
+        }
+        failures.Add(DateTime.UtcNow);
+    }
+
+    private static bool ValidKey(string key) => key.Length == 0 || (key.Length == 64 && key.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')));
+
+    private void HandleCreate(Client client, string[] f)
+    {
+        if (client.Room != null)
+        {
+            return;
+        }
+        string? name = f.Length > 1 ? Protocol.NormalizeId(f[1]) : null;
+        string key = f.Length > 2 ? f[2].Trim().ToLowerInvariant() : string.Empty;
+        if (name == null || !ValidKey(key))
+        {
+            client.Send(Protocol.Encode(Protocol.Error, "Raumname: 1-32 Zeichen a-z, 0-9, - oder _."));
+            return;
+        }
+        if (rooms.ContainsKey(name))
+        {
+            client.Send(Protocol.Encode(Protocol.Error, $"Raum '{name}' gibt es schon."));
+            return;
+        }
+        CreateRoom(client, name, key);
+    }
+
+    private void CreateRoom(Client client, string name, string key)
+    {
+        if (options.MaxRooms > 0 && rooms.Count >= options.MaxRooms)
+        {
+            client.Send(Protocol.Encode(Protocol.Error, $"Der Server hat schon {options.MaxRooms} Räume. Bitte einem bestehenden beitreten."));
+            client.Send(RoomListLine());
+            return;
+        }
+        var room = new Room(name) { Key = key.Length > 0 ? key : null };
+        rooms[name] = room;
+        Log($"[{name}] room created by #{client.Id} {client.Initials}" + (room.Locked ? " (password)" : string.Empty));
+        JoinRoom(client, room);
+    }
+
+    private void HandleJoin(Client client, string[] f)
+    {
+        if (client.Room != null)
+        {
+            return;
+        }
+        string? name = f.Length > 1 ? Protocol.NormalizeId(f[1]) : null;
+        if (name == null || !rooms.TryGetValue(name, out Room? room))
+        {
+            client.Send(Protocol.Encode(Protocol.Error, "Diesen Raum gibt es nicht mehr."));
+            client.Send(RoomListLine());
+            return;
+        }
+        if (room.Locked)
+        {
+            if (Locked(client))
+            {
+                client.Send(Protocol.Encode(Protocol.Error, "Zu viele falsche Passwörter. Bitte später erneut versuchen."));
+                return;
+            }
+            string proof = f.Length > 2 ? f[2] : string.Empty;
+            byte[] expected = Encoding.ASCII.GetBytes(Protocol.AuthProof(room.Key!, client.Nonce));
+            byte[] actual = Encoding.ASCII.GetBytes(proof.Trim().ToLowerInvariant());
+            if (!CryptographicOperations.FixedTimeEquals(expected, actual))
+            {
+                RecordFailure(client);
+                client.Send(Protocol.Encode(Protocol.Error, "Falsches Raum-Passwort."));
+                return;
+            }
+        }
+        JoinRoom(client, room);
+    }
+
+    private void JoinRoom(Client client, Room room)
+    {
+        if (room.Members.Count >= Protocol.MaxPlayers)
+        {
+            client.Send(Protocol.Encode(Protocol.Error, $"Raum '{room.Name}' ist voll ({Protocol.MaxPlayers} Spieler)."));
+            client.Send(RoomListLine());
+            return;
+        }
         client.Room = room;
         room.Members.Add(client);
-        Log($"#{client.Id} joined room '{roomName}' as {initials} ({character})");
-        client.Send(Protocol.Encode(Protocol.Welcome, Protocol.Int(client.Id)));
+        Log($"#{client.Id} joined room '{room.Name}' as {client.Initials} ({client.Character})");
+        client.Send(Protocol.Encode(Protocol.Joined, room.Name));
         BroadcastLobby(room);
+    }
+
+    /// <summary>Takes a client out of its room (leave, kick, disconnect). Empty rooms close.</summary>
+    private void LeaveRoom(Client client, string reason, bool notify)
+    {
+        Room? room = client.Room;
+        if (room == null)
+        {
+            return;
+        }
+        client.Room = null;
+        room.Members.Remove(client);
+        Match? m = room.Match;
+        Participant? p = m?.Find(client);
+        if (m != null && p != null && !p.Finished)
+        {
+            p.Status = Protocol.StatusLeft;
+            p.Score = 0;
+        }
+        if (notify)
+        {
+            client.Send(Protocol.Encode(Protocol.RoomLeft, reason));
+        }
+        if (!room.Members.Any(x => !x.IsBot))
+        {
+            rooms.Remove(room.Name);
+            Log($"[{room.Name}] room closed");
+        }
+        else
+        {
+            if (m != null)
+            {
+                AfterParticipantGone(room, m);
+            }
+            BroadcastLobby(room);
+        }
+        BroadcastRoomList();
+    }
+
+    private void HandleRoomPassword(Client client, Room room, string[] f)
+    {
+        if (room.Host != client)
+        {
+            client.Send(Protocol.Encode(Protocol.Error, "Nur der Host kann das Raum-Passwort ändern."));
+            return;
+        }
+        string key = f.Length > 1 ? f[1].Trim().ToLowerInvariant() : string.Empty;
+        if (!ValidKey(key))
+        {
+            return;
+        }
+        room.Key = key.Length > 0 ? key : null;
+        Log($"[{room.Name}] password {(room.Locked ? "set" : "removed")} by host");
+        BroadcastLobby(room);
+    }
+
+    private void HandleKick(Client client, Room room, string[] f)
+    {
+        if (room.Host != client)
+        {
+            client.Send(Protocol.Encode(Protocol.Error, "Nur der Host kann Spieler entfernen."));
+            return;
+        }
+        if (f.Length < 2 || !Protocol.TryInt(f[1], out int id))
+        {
+            return;
+        }
+        Client? target = room.Members.FirstOrDefault(m => m.Id == id && m != client);
+        if (target == null)
+        {
+            return;
+        }
+        if (room.Match != null)
+        {
+            client.Send(Protocol.Encode(Protocol.Error, "Während einer Runde geht das nicht."));
+            return;
+        }
+        Log($"[{room.Name}] host removed #{target.Id} {target.Initials}");
+        if (target.IsBot)
+        {
+            room.Members.Remove(target);
+            target.Room = null;
+            BroadcastLobby(room);
+            return;
+        }
+        LeaveRoom(target, "Der Host hat dich aus dem Raum entfernt.", notify: true);
+    }
+
+    private string RoomListLine()
+    {
+        var fields = new List<string> { Protocol.RoomList, Protocol.Int(options.MaxRooms) };
+        foreach (Room r in rooms.Values.OrderBy(r => r.Name, StringComparer.Ordinal))
+        {
+            fields.Add(Protocol.Join(r.Name, Protocol.Int(r.Members.Count), Protocol.Int(Protocol.MaxPlayers),
+                r.Match != null ? Protocol.StateMatch : Protocol.StateLobby, r.Locked ? "1" : "0", r.Host?.Initials ?? "-"));
+        }
+        return Protocol.Encode(fields.ToArray());
+    }
+
+    /// <summary>Pushes the room list to everybody in the room browser when it changed.</summary>
+    private void BroadcastRoomList()
+    {
+        string line = RoomListLine();
+        if (line == lastRoomList)
+        {
+            return;
+        }
+        lastRoomList = line;
+        foreach (Client c in clients.Where(c => c.Authed && c.Room == null))
+        {
+            c.Send(line);
+        }
     }
 
     private void HandleChar(Client client, Room room, string[] f)
@@ -704,6 +1090,7 @@ public sealed partial class GameServer
             Protocol.Int(host?.Id ?? 0),
             room.Match != null ? Protocol.StateMatch : Protocol.StateLobby,
             Protocol.Int(room.BotLevel),
+            room.Locked ? "1" : "0",
         };
         foreach (Client member in room.Members)
         {
@@ -717,11 +1104,12 @@ public sealed partial class GameServer
         {
             member.Send(line);
         }
+        BroadcastRoomList();
     }
 
     private bool ProofMatches(string nonce, string proof)
     {
-        byte[] expected = Encoding.ASCII.GetBytes(Protocol.AuthProof(EffectivePassword!, nonce));
+        byte[] expected = Encoding.ASCII.GetBytes(Protocol.AuthProof(EffectiveKey!, nonce));
         byte[] actual = Encoding.ASCII.GetBytes((proof ?? string.Empty).Trim().ToLowerInvariant());
         return CryptographicOperations.FixedTimeEquals(expected, actual);
     }
@@ -740,31 +1128,7 @@ public sealed partial class GameServer
             return;
         }
         Log($"#{client.Id} disconnected ({reason})");
-        Room? room = client.Room;
-        client.Room = null;
-        if (room == null)
-        {
-            return;
-        }
-        room.Members.Remove(client);
-        Match? m = room.Match;
-        Participant? p = m?.Find(client);
-        if (m != null && p != null && !p.Finished)
-        {
-            p.Status = Protocol.StatusLeft;
-            p.Score = 0;
-        }
-        if (!room.Members.Any(x => !x.IsBot))
-        {
-            rooms.Remove(room.Name);
-            Log($"[{room.Name}] room closed");
-            return;
-        }
-        if (m != null)
-        {
-            AfterParticipantGone(room, m);
-        }
-        BroadcastLobby(room);
+        LeaveRoom(client, reason, notify: false);
     }
 
     internal static void Log(string message)
@@ -831,6 +1195,15 @@ internal sealed class Client
     public Channel<string> Outbox { get; } = Channel.CreateBounded<string>(new BoundedChannelOptions(512) { FullMode = BoundedChannelFullMode.DropOldest });
     public DateTime LastSeen { get; set; }
     public bool Closing { get; set; }
+
+    /// <summary>Passed HELLO (password, consent); may be in the room browser or a room.</summary>
+    public bool Authed { get; set; }
+
+    /// <summary>Asked for a legal text before HELLO; gets more time for the handshake.</summary>
+    public bool ReadingDocuments { get; set; }
+
+    public DateTime RateWindowStart { get; set; }
+    public int RateCount { get; set; }
     public string Initials { get; set; } = "???";
     public string Character { get; set; } = "tim";
     public Room? Room { get; set; }
@@ -897,6 +1270,11 @@ internal sealed class Room
     public Client? Host => Members.FirstOrDefault(m => !m.IsBot);
     public int BotLevel { get; set; } = Bots.DefaultLevel;
     public Match? Match { get; set; }
+
+    /// <summary>Room key (hex SHA-256 of the room password), null = open room.</summary>
+    public string? Key { get; set; }
+
+    public bool Locked => !string.IsNullOrEmpty(Key);
 }
 
 internal sealed class Match

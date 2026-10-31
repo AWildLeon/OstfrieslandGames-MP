@@ -12,6 +12,7 @@ lokalen Hot-Seat-Modus von *Ostfriesland Games* ins Netz bringt.
 | --- | --- |
 | ![Mehrspieler-Auswahl](docs/screenshots/01-mehrspieler.png) | ![Lobby](docs/screenshots/05-lobby-host-bots.png) |
 | ![Runde](docs/screenshots/06-runde-hud.png) | ![Ergebnis](docs/screenshots/07-ergebnis.png) |
+| ![Datenschutz](docs/screenshots/08-datenschutz.png) | ![Raumliste](docs/screenshots/09-raumliste.png) |
 
 Technische Details: [Developer.md](Developer.md).
 
@@ -80,20 +81,23 @@ cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
 2. Es öffnet sich die **Figurenauswahl des Spiels** (Ostfriesland-Karte, Initialen-Kästchen) –
    genau wie beim Mehrspieler an einem Gerät, nur für dich allein. Figur wählen, Initialen
    eingeben, bestätigen. Später änderbar über die Zeile *Spieler* (öffnet wieder die Auswahl).
-3. Auf der Online-Seite Server, ggf. Passwort und Raum einstellen → **Verbinden**.
+3. Auf der Online-Seite Server und ggf. Server-Passwort einstellen → **Verbinden**.
    Bedienung wie in den Spielmenüs: Hoch/Runter wählen, Bestätigen öffnet ein Feld zum Tippen
    (Enter übernimmt, Esc bricht ab), Links/Rechts ändert Werte; Maus geht auch.
-   Alle Mitspieler nutzen denselben Server und denselben Raumnamen.
    Rechts steht deine gewählte Figur mit einem ihrer Sprüche aus der Figurenauswahl des Spiels.
-   Nach dem Verbinden geht es automatisch in die Lobby. Dort zeigt eine Statuszeile, worauf
-   gewartet wird („Warte auf andere Spieler …“, „Warte auf den Host …“), freie Plätze sind
-   abgeblendet sichtbar.
-   *Raum verlassen* (oder Esc) in der Lobby trennt die Verbindung. Nach einer Runde kommst du
-   automatisch zurück in die Lobby.
-4. Sobald mindestens zwei Spieler (oder Bots) im Raum sind, wählt der Host die Disziplin
-   und startet die Runde.
-5. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.
-6. Nach deinem Lauf wartest du auf die anderen, danach kommt der gemeinsame Ergebnisbildschirm.
+   Auf einem **öffentlichen Server** erscheinen zuerst Datenschutzhinweise und Impressum des
+   Betreibers; erst nach *Akzeptieren und beitreten* geht es weiter (einmal pro Server und
+   Fassung der Datenschutzhinweise).
+4. In der **Raumliste** einem Raum beitreten (bei *[Passwort]* das Raum-Passwort eintippen) oder
+   *Raum erstellen* (Name, optional Passwort). Die Lobby zeigt in einer Statuszeile, worauf
+   gewartet wird („Warte auf andere Spieler …“, „Warte auf den Host …“).
+   *Raum verlassen* (oder Esc) führt zurück in die Raumliste, *Trennen* dort beendet die
+   Verbindung. Nach einer Runde kommst du automatisch zurück in die Lobby.
+5. Sobald mindestens zwei Spieler (oder Bots) im Raum sind, wählt der Host die Disziplin
+   und startet die Runde. Als Host kannst du außerdem ein Raum-Passwort setzen/entfernen und
+   Spieler oder Bots aus dem Raum entfernen.
+6. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.
+7. Nach deinem Lauf wartest du auf die anderen, danach kommt der gemeinsame Ergebnisbildschirm.
    Dort startet der Host per Revanche-Taste (Leertaste) die nächste Runde oder wählt eine andere Disziplin.
 
 Unten rechts siehst du während einer Runde alle Spieler mit Status und Punkten.
@@ -111,7 +115,7 @@ Unten rechts siehst du während einer Runde alle Spieler mit Status und Punkten.
   lokalen Bestenliste der Disziplin.
 
 Einstellungen landen in `BepInEx/config/de.onlh.ostfriesland.multiplayer.cfg`
-(Server, Passwort, Raum, Initialen, Figur, F8-Abkürzung, Ecke für die Spielerliste,
+(Server, Passwort, zuletzt erstellter Raum, Initialen, Figur, akzeptierte Datenschutz-Fassungen, F8-Abkürzung, Ecke für die Spielerliste,
 `Privacy.BlockScoreApiWhileOnline`).
 
 ### Online-Bestenliste des Spiels
@@ -162,28 +166,55 @@ Der Server liest Befehle von seiner Standardeingabe – einfach ins Terminal tip
 | `kick <id> [grund]` | Spieler trennen |
 | `ban <id\|ip> [grund]` / `unban <ip>` / `bans` | IP dauerhaft sperren / entsperren / auflisten |
 | `endmatch <raum>` | laufende Runde beenden, Unfertige bekommen 0 |
-| `closeroom <raum> [grund]` | alle Spieler eines Raums trennen |
+| `closeroom <raum> [grund]` | Raum schließen, Spieler zurück in die Raumliste |
+| `motd <text\|off>` | Nachricht in der Raumliste ändern |
+| `legal reload` | Impressum/Datenschutz/Regeln neu einlesen (neue Datenschutz-Fassung = neue Zustimmung) |
 | `password <neu\|off\|reset>` | Passwort dauerhaft ändern/abschalten; `reset` = wieder das aus `--password-file` |
 | `shutdown [sekunden] [grund]` / `shutdown cancel` | Server beenden, optional mit Countdown im Spiel |
 
 Bans und Passwort-Änderungen landen in der State-Datei (JSON, nur für den Besitzer lesbar,
 atomar geschrieben) und überleben Neustarts. Ist die Datei kaputt, startet der Server nicht,
-statt still alle Bans zu vergessen. Achtung: Ein per `password` gesetztes Passwort steht
-im Klartext darin.
+statt still alle Bans zu vergessen. Passwörter stehen dort nie im Klartext (siehe unten), und
+der Befehl `password …` erscheint im Log nur als `password ***`.
 
 Getrennte/gekickte Spieler sehen den Grund als Meldung im Spiel. Strg+C und `SIGTERM`
 (z. B. `systemctl stop`) beenden ebenfalls sauber und verabschieden alle Spieler.
 
-### Passwort
+### Passwörter
 
-Ohne Passwort ist der Server offen. Mit Passwort trägt jeder Spieler es auf der Online-Seite ein.
-Das Passwort wird **nie im Klartext übertragen**: Der Server schickt pro Verbindung eine
-zufällige Nonce, der Client antwortet mit `HMAC-SHA256(Passwort, Nonce)`. Nach 5 falschen
-Versuchen innerhalb von 5 Minuten wird die IP vorübergehend gesperrt.
+Es gibt ein optionales **Server-Passwort** (Betreiber) und optionale **Raum-Passwörter**
+(setzt der Host eines Raums). Für beide gilt:
 
-Im Spiel steht das Passwort im Klartext in der BepInEx-Konfigurationsdatei. Wer eine
-Verbindung mitschneidet, kann ein schwaches Passwort offline durchprobieren – also ein
-langes, zufälliges Passwort nehmen.
+- Der Client leitet aus dem Passwort per **PBKDF2-HMAC-SHA256** (30 000 Runden) einen Schlüssel
+  ab; bei Raum-Passwörtern ist der Raumname Teil des Salts.
+- Übertragen wird nur `HMAC-SHA256(Schlüssel, Nonce)` mit einer zufälligen Nonce pro Verbindung –
+  weder Passwort noch Schlüssel gehen über die Leitung.
+- Der Server kennt und speichert nur den Schlüssel. Das Server-Passwort aus `--password-file`
+  wird beim Start sofort abgeleitet; per `password` gesetzte landen nur als Schlüssel in der
+  State-Datei. **Als Betreiber siehst du Spieler-Passwörter also nie im Klartext.**
+- Nach 5 falschen Versuchen in 5 Minuten wird die IP vorübergehend gesperrt.
+
+Auf dem Spieler-Rechner steht das Server-Passwort in der BepInEx-Konfigurationsdatei;
+Raum-Passwörter werden dort nicht gespeichert. Gegen Mitschnitte schwacher Passwörter hilft
+nur ein langes Passwort (die Verbindung ist nicht verschlüsselt).
+
+### Öffentlicher Server
+
+```bash
+OGMultiplayer.Server --public --name "Moin-Server" --motd "Willkommen!" \
+  --imprint-file impressum.txt --privacy-file datenschutz.txt --rules-file regeln.txt
+```
+
+- **Rechtliches:** Ohne Impressum und Datenschutzhinweise startet ein Public-Server nicht.
+  Spieler sehen Datenschutz, Impressum und Regeln im Spiel und müssen vor dem Beitritt
+  zustimmen; der Server prüft die akzeptierte Fassung (Hash) und protokolliert die Zustimmung.
+  Ändert sich die Datenschutz-Datei, wird beim nächsten Verbinden neu gefragt. In der
+  Raumliste sind die Texte jederzeit über *Impressum & Datenschutz* erreichbar.
+  Vorlagen (Platzhalter ausfüllen, **keine Rechtsberatung**): [`docs/legal/`](docs/legal/).
+- **Grenzen:** Standardmäßig max. 50 Räume (`--max-rooms`), 3 Verbindungen pro IP
+  (`--max-per-ip`), 30 Nachrichten pro Sekunde pro Verbindung, max. 4 Spieler pro Raum.
+- **Datensparsamkeit:** IP-Adressen stehen im Log nur gekürzt (`--log-ips` für volle IPs).
+  Nichts außer Bans und Admin-Passwort wird dauerhaft gespeichert.
 
 ### NixOS-Modul
 
@@ -202,6 +233,14 @@ langes, zufälliges Passwort nehmen.
             port = 27420;
             openFirewall = true;
             passwordFile = "/run/secrets/ogmultiplayer-password"; # optional, z. B. via agenix/sops-nix
+
+            # öffentlicher Server (optional)
+            public = true;
+            serverName = "Moin-Server";
+            motd = "Willkommen!";
+            imprintFile = "/etc/ogmultiplayer/impressum.txt";
+            privacyFile = "/etc/ogmultiplayer/datenschutz.txt";
+            rulesFile = "/etc/ogmultiplayer/regeln.txt";
           };
         }
       ];
@@ -211,8 +250,8 @@ langes, zufälliges Passwort nehmen.
 ```
 
 Der Dienst läuft als `DynamicUser` mit systemd-Härtung; Bans liegen in
-`/var/lib/ogmultiplayer/state.json`. Die Passwortdatei wird per
-`LoadCredential` eingelesen und landet nicht im Nix-Store.
+`/var/lib/ogmultiplayer/state.json`. Passwort- und Rechtstext-Dateien werden per
+`LoadCredential` eingelesen (dürfen also dem Dienst-Benutzer unzugänglich sein).
 
 > Das Passwort schützt den Zugang, verschlüsselt aber nicht die Spieldaten (Initialen,
 > Punkte). Wer mehr will: VPN (z. B. WireGuard, Tailscale).

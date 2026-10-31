@@ -77,7 +77,7 @@ namespace OGMultiplayer.Plugin
                         {
                             break;
                         }
-                        if (line.Length <= Protocol.MaxLineLength)
+                        if (line.Length <= Protocol.MaxServerLineLength)
                         {
                             incoming.Enqueue(line);
                         }

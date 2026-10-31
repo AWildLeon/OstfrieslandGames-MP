@@ -28,7 +28,9 @@ public sealed partial class GameServer
         ("unban <ip>", "Sperre aufheben"),
         ("bans", "gesperrte IPs mit Grund und Datum"),
         ("endmatch <raum>", "laufende Runde beenden (Unfertige = 0 Punkte)"),
-        ("closeroom <raum> [grund]", "alle Spieler eines Raums trennen"),
+        ("closeroom <raum> [grund]", "Raum schließen, Spieler zurück in die Raumliste"),
+        ("motd <text|off>", "Nachricht in der Raumliste (bis zum Neustart)"),
+        ("legal reload", "Impressum/Datenschutz/Regeln neu einlesen"),
         ("password <neu|off|reset>", "Passwort dauerhaft aendern/abschalten; reset = wieder aus der Konfiguration"),
         ("shutdown [sekunden] [grund]", "Server beenden, optional mit Countdown"),
         ("shutdown cancel", "geplanten Shutdown abbrechen"),
@@ -87,7 +89,9 @@ public sealed partial class GameServer
         {
             return string.Empty;
         }
-        Log($"[admin] {trimmed}");
+        // never write a password to the log
+        Log(cmd == "password" && !rest.Equals("off", StringComparison.OrdinalIgnoreCase) && !rest.Equals("reset", StringComparison.OrdinalIgnoreCase)
+            ? "[admin] password ***" : $"[admin] {trimmed}");
         try
         {
             lock (sync)
@@ -98,6 +102,8 @@ public sealed partial class GameServer
                     "status" => StatusText(),
                     "players" or "list" => PlayersText(),
                     "rooms" => RoomsText(),
+                    "motd" => SetMotd(rest),
+                    "legal" => ReloadLegal(rest),
                     "say" => Say(null, rest),
                     "sayroom" => SayRoom(rest),
                     "kick" => KickCommand(rest),
@@ -134,7 +140,10 @@ public sealed partial class GameServer
             $"Adresse:      {options.Bind}:{BoundPort} (Protokoll v{Protocol.Version})",
             $"Verbindungen: {clients.Count} ({inRooms} in Raeumen)",
             $"Raeume:       {rooms.Count} ({matches} mit laufender Runde)",
-            $"Passwort:     {(PasswordRequired ? "an" : "aus")}{(state.PasswordDisabled || state.PasswordOverride != null ? " (per Admin geaendert)" : string.Empty)}",
+            $"Modus:        {(options.Public ? "öffentlich" : "privat")} - {options.ServerName}",
+            $"Rechtstexte:  {(documents.Count == 0 ? "keine" : DocumentList())}{(privacyHash.Length > 0 ? " (Datenschutz " + privacyHash + ")" : string.Empty)}",
+            $"Raumlimit:    {(options.MaxRooms > 0 ? options.MaxRooms.ToString() : "keins")}, pro IP: {(options.MaxConnectionsPerIp > 0 ? options.MaxConnectionsPerIp.ToString() : "unbegrenzt")}",
+            $"Passwort:     {(PasswordRequired ? "an" : "aus")}{(state.PasswordDisabled || state.PasswordKeyOverride != null ? " (per Admin geaendert)" : string.Empty)}",
             $"Bans:         {bans.Count}",
             $"State-Datei:  {(string.IsNullOrEmpty(options.StateFile) ? "keine (nichts bleibt erhalten)" : options.StateFile)}",
             pendingShutdown != null ? "Shutdown:     geplant" : "Shutdown:     -");
@@ -170,7 +179,7 @@ public sealed partial class GameServer
             string match = r.Match == null
                 ? "Lobby"
                 : $"Runde {r.Match.Id}, Disziplin {r.Match.Discipline}, " + string.Join(", ", r.Match.Participants.Select(p => $"{p.Initials}:{p.Status}:{p.Score}"));
-            lines.Add($"{r.Name}  [{r.Members.Count}/{Protocol.MaxPlayers}]  Host {r.Host?.Initials ?? "-"}  {match}");
+            lines.Add($"{r.Name}{(r.Locked ? " (Passwort)" : string.Empty)}  [{r.Members.Count}/{Protocol.MaxPlayers}]  Host {r.Host?.Initials ?? "-"}  {match}");
             lines.Add("    " + string.Join(", ", r.Members.Select(m => m.IsBot ? $"#{m.Id} {m.Initials} (Bot, {Bots.LevelName(m.BotLevel)})" : $"#{m.Id} {m.Initials}")));
         }
         return string.Join("\n", lines);
@@ -316,12 +325,39 @@ public sealed partial class GameServer
         }
         string reason = parts.Length > 1 ? "Raum geschlossen: " + parts[1] : "Raum vom Admin geschlossen.";
         int n = 0;
-        foreach (Client c in room.Members.ToList())
+        foreach (Client c in room.Members.Where(m => !m.IsBot).ToList())
         {
-            Kick(c, reason);
+            c.Send(Protocol.Encode(Protocol.Msg, reason));
+            LeaveRoom(c, reason, notify: true);
             n++;
         }
-        return $"Raum '{room.Name}' geschlossen, {n} Spieler getrennt.";
+        rooms.Remove(room.Name);
+        BroadcastRoomList();
+        return $"Raum '{room.Name}' geschlossen, {n} Spieler zurück in der Raumliste.";
+    }
+
+    private string SetMotd(string rest)
+    {
+        options.Motd = rest.Length == 0 || rest.Equals("off", StringComparison.OrdinalIgnoreCase) ? null : rest;
+        string info = Protocol.Encode(Protocol.ServerInfo, options.ServerName, options.Public ? "1" : "0", options.Motd ?? string.Empty, DocumentList());
+        foreach (Client c in clients.Where(c => c.Authed))
+        {
+            c.Send(info);
+        }
+        return options.Motd == null ? "MOTD entfernt." : "MOTD gesetzt.";
+    }
+
+    private string ReloadLegal(string rest)
+    {
+        if (!rest.Equals("reload", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Aufruf: legal reload";
+        }
+        string before = privacyHash;
+        LoadDocuments();
+        return privacyHash != before
+            ? $"Neu eingelesen. Datenschutz-Fassung {privacyHash}: Spieler müssen beim nächsten Verbinden neu zustimmen."
+            : "Neu eingelesen.";
     }
 
     private string SetPassword(string rest)
@@ -334,19 +370,20 @@ public sealed partial class GameServer
         if (rest.Equals("off", StringComparison.OrdinalIgnoreCase))
         {
             state.PasswordDisabled = true;
-            state.PasswordOverride = null;
+            state.PasswordKeyOverride = null;
             result = "Passwort abgeschaltet";
         }
         else if (rest.Equals("reset", StringComparison.OrdinalIgnoreCase))
         {
             state.PasswordDisabled = false;
-            state.PasswordOverride = null;
+            state.PasswordKeyOverride = null;
             result = PasswordRequired ? "Passwort wieder aus der Konfiguration" : "Passwort-Aenderung verworfen, Server ist offen";
         }
         else
         {
             state.PasswordDisabled = false;
-            state.PasswordOverride = rest;
+            // only the derived key is kept and saved, never the password
+            state.PasswordKeyOverride = Protocol.ServerKey(rest);
             result = "Passwort geaendert";
         }
         SaveState();

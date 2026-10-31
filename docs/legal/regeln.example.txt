@@ -1,0 +1,9 @@
+REGELN
+
+1. Sei fair und freundlich zu anderen Spielern.
+2. Keine beleidigenden oder anstößigen Initialen oder Raumnamen.
+3. Kein Cheaten, keine manipulierten Clients, kein absichtliches Stören von Runden.
+4. Der Betreiber darf Spieler trennen oder sperren und Räume schließen.
+5. Kein Anspruch auf Verfügbarkeit; der Server kann jederzeit neu starten.
+
+Dies ist ein inoffizieller Fan-Server, nicht von den Entwicklern von "Ostfriesland Games".

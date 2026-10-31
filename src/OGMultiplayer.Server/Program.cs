@@ -36,6 +36,7 @@ if (envBind != null && IPAddress.TryParse(envBind, out IPAddress? b))
     options.Bind = b;
 }
 
+bool maxRoomsSet = false, maxPerIpSet = false, logIpsSet = false;
 for (int i = 0; i < args.Length; i++)
 {
     string arg = args[i];
@@ -96,6 +97,68 @@ for (int i = 0; i < args.Length; i++)
             options.StateFile = next;
             i++;
             break;
+        case "--public":
+            options.Public = true;
+            break;
+        case "--name":
+            if (string.IsNullOrWhiteSpace(next))
+            {
+                return Fail("--name braucht einen Text");
+            }
+            options.ServerName = Protocol.Clean(next).Replace("|", "/").Trim();
+            i++;
+            break;
+        case "--motd":
+            if (next == null)
+            {
+                return Fail("--motd braucht einen Text");
+            }
+            options.Motd = next;
+            i++;
+            break;
+        case "--imprint-file":
+        case "--privacy-file":
+        case "--rules-file":
+            if (next == null || !File.Exists(next))
+            {
+                return Fail($"{arg}: Datei nicht gefunden: {next}");
+            }
+            if (arg == "--imprint-file")
+            {
+                options.ImprintFile = next;
+            }
+            else if (arg == "--privacy-file")
+            {
+                options.PrivacyFile = next;
+            }
+            else
+            {
+                options.RulesFile = next;
+            }
+            i++;
+            break;
+        case "--max-rooms":
+            if (next == null || !Protocol.TryInt(next, out int mr) || mr < 0)
+            {
+                return Fail("--max-rooms braucht eine Zahl (0 = unbegrenzt)");
+            }
+            options.MaxRooms = mr;
+            maxRoomsSet = true;
+            i++;
+            break;
+        case "--max-per-ip":
+            if (next == null || !Protocol.TryInt(next, out int mpi) || mpi < 0)
+            {
+                return Fail("--max-per-ip braucht eine Zahl (0 = unbegrenzt)");
+            }
+            options.MaxConnectionsPerIp = mpi;
+            maxPerIpSet = true;
+            i++;
+            break;
+        case "--log-ips":
+            logIpsSet = true;
+            options.LogIps = true;
+            break;
         case "--no-state":
             options.StateFile = null;
             break;
@@ -119,6 +182,19 @@ for (int i = 0; i < args.Length; i++)
                       --no-state             nichts speichern
                       --no-console           keine Admin-Befehle von stdin lesen
 
+                Öffentlicher Server:
+                      --public               Public-Modus: Impressum + Datenschutz Pflicht, Spieler stimmen
+                                             vor dem Beitritt zu; Standards: 50 Räume, 3 Verbindungen pro IP,
+                                             IPs im Log gekürzt
+                      --name <text>          Servername (Raumliste)
+                      --motd <text>          Nachricht in der Raumliste
+                      --imprint-file <pfad>  Impressum (Textdatei)
+                      --privacy-file <pfad>  Datenschutzhinweise (Textdatei)
+                      --rules-file <pfad>    Regeln/Nutzungsbedingungen (optional)
+                      --max-rooms <n>        maximale Raumanzahl (0 = unbegrenzt)
+                      --max-per-ip <n>       Verbindungen pro IP (0 = unbegrenzt)
+                      --log-ips              volle IP-Adressen ins Log schreiben
+
                 Admin-Befehle (stdin, 'help' fuer alle): status, players, rooms, say, kick, ban,
                 endmatch, closeroom, password, shutdown [sekunden] [grund] ...
                 """);
@@ -129,6 +205,22 @@ for (int i = 0; i < args.Length; i++)
 }
 
 Console.WriteLine("OGMultiplayer.Server - inoffizieller Fan-Server, keine Verbindung zu den Entwicklern von Ostfriesland Games.");
+if (options.Public)
+{
+    if (!maxRoomsSet)
+    {
+        options.MaxRooms = 50;
+    }
+    if (!maxPerIpSet)
+    {
+        options.MaxConnectionsPerIp = 3;
+    }
+    if (!logIpsSet)
+    {
+        options.LogIps = false;
+    }
+}
+
 var server = new GameServer(options);
 Task run = server.RunAsync(CancellationToken.None);
 try

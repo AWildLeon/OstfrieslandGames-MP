@@ -89,6 +89,7 @@ namespace OGMultiplayer.Plugin
                         HandleBot(new[] { Protocol.Bot, Protocol.BotAdd });
                         outgoing.Clear();
                         Reply(Protocol.Welcome, Protocol.Int(HumanId));
+                        Reply(Protocol.Joined, "offline");
                         Lobby();
                     }
                     break;
@@ -266,7 +267,7 @@ namespace OGMultiplayer.Plugin
 
         private void Lobby()
         {
-            var fields = new List<string> { Protocol.Lobby, "offline", Protocol.Int(HumanId), inMatch ? Protocol.StateMatch : Protocol.StateLobby, Protocol.Int(botLevel) };
+            var fields = new List<string> { Protocol.Lobby, "offline", Protocol.Int(HumanId), inMatch ? Protocol.StateMatch : Protocol.StateLobby, Protocol.Int(botLevel), "0" };
             fields.AddRange(members.Select(m => Protocol.Join(Protocol.Int(m.Id), m.Initials, m.Character, m.Status, Protocol.Int(m.Score), m.IsBot ? "1" : "0")));
             Reply(fields.ToArray());
         }

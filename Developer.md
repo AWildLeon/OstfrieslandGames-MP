@@ -16,9 +16,11 @@ Für Spieler und Server-Betreiber reicht die [README](README.md).
 | ![Verbinden](docs/screenshots/03-verbinden.png) | ![Lobby, wartet](docs/screenshots/04-lobby-warten.png) |
 | **Verbinden** mit Figur + Spruch (`OnlineMenu`, *Connect*) | **Lobby** allein, Statuszeile „Warte auf andere Spieler“ |
 | ![Lobby Host mit Bot](docs/screenshots/05-lobby-host-bots.png) | ![Runde mit HUD](docs/screenshots/06-runde-hud.png) |
-| **Lobby als Host** mit Mitspieler und Server-Bot | **Laufende Runde** mit Spielerliste (`OnlineHud`) |
-| ![Ergebnis](docs/screenshots/07-ergebnis.png) | |
-| **Ergebnis** im Original-Bildschirm (Bot „MOI“ auf Platz 2) | |
+| **Lobby als Host**: Mitspieler, Server-Bot, Raum-Passwort, Spieler entfernen | **Laufende Runde** mit Spielerliste (`OnlineHud`) |
+| ![Ergebnis](docs/screenshots/07-ergebnis.png) | ![Datenschutz](docs/screenshots/08-datenschutz.png) |
+| **Ergebnis** im Original-Bildschirm | **Datenschutzhinweise** eines Public-Servers vor dem Beitritt (*Legal*) |
+| ![Raumliste](docs/screenshots/09-raumliste.png) | |
+| **Raumliste** mit MOTD und passwortgeschütztem Raum (*Rooms*) | |
 
 Alle Bilder stammen aus automatisierten Testläufen (Xvfb, siehe [Testen](#testen)).
 
@@ -201,6 +203,11 @@ sie in der Konfiguration und kehrt ins Start-Menü zurück (`OnlineSetup.Finishe
 
 ### Menüs und HUD
 
+Seiten: *Choice* (Mehrspieler-Auswahl), *Connect* (Server, Passwort, Spieler), *Legal*
+(Datenschutz/Impressum/Regeln, seitenweise, mit Zustimmung bei Public-Servern), *Rooms*
+(Raumliste, Beitritt mit Passwort-Eingabe), *CreateRoom*, *Lobby*. Übergänge folgen dem
+Sitzungszustand (`NeedsConsent`, `Connected`, `InRoom`).
+
 `OnlineMenu` baut Canvas, Texte, Auswahlpfeil und Puls-Effekt aus den Bausteinen des
 Start-Menüs (`ApplyMultiplayerTextStyle`, `ApplyMultiplayerSelectionEffect`,
 Auswahlpfeil-Sprite, Referenzauflösung des Menü-Canvas). Eingaben laufen über `ArcadeInput`
@@ -211,7 +218,7 @@ in einer selbst gezeichneten 9-Slice-Sprechblase in den Farben der Spiel-Blase.
 
 Wichtige Regeln:
 
-- Lobby verlassen (`Raum verlassen`/Esc) trennt immer die Verbindung.
+- Lobby verlassen (`Raum verlassen`/Esc) führt online in die Raumliste, offline beendet es das Spiel gegen Bots; *Trennen* in der Raumliste beendet die Verbindung.
 - Nach `VERBINDEN` geht es automatisch in die Lobby; erneutes Drücken trennt nicht.
 - Endet eine Online-Runde (Ergebnis → Menü), öffnet sich die Lobby wieder
   (`OnlineSession.ReturnToLobby`).
@@ -236,10 +243,17 @@ UTF-8-Zeile, Felder durch Tab getrennt, Unterfelder durch `|`. Version: **1**.
 
 | Richtung | Nachricht | Bedeutung |
 | --- | --- | --- |
-| S→C | `CHALLENGE ver nonce pwRequired` | sofort nach dem Verbinden |
-| C→S | `HELLO ver INI char room proof` | Anmeldung; `proof` = hex HMAC-SHA256(Passwort, Nonce) oder leer |
+| S→C | `CHALLENGE ver nonce pwRequired public privacyHash name` | sofort nach dem Verbinden |
+| C→S | `DOC privacy\|imprint\|rules` | Rechtstext anfordern (auch vor `HELLO`) |
+| S→C | `DOCTEXT kind text` | Text mit `EscapeText` (Backslash, Tab, Zeilenumbruch) |
+| C→S | `HELLO ver INI char room proof consent` | `proof` = `AuthProof(ServerKey(pw), nonce)` oder leer; `consent` = akzeptierter `privacyHash`; leerer `room` = Raumliste |
 | S→C | `WELCOME id` / `ERROR text` / `BYE grund` | Antwort / Fehler / Trennung mit Grund |
-| S→C | `LOBBY room hostId state botLevel player*` | `player` = `id\|INI\|char\|status\|score\|bot` |
+| S→C | `SERVERINFO name public motd docs` | nach `WELCOME` und bei MOTD-Änderung |
+| C→S / S→C | `ROOMS` / `ROOMLIST maxRooms room*` | `room` = `name\|spieler\|max\|state\|locked\|hostINI`; wird bei Änderungen an alle in der Raumliste gepusht |
+| C→S | `CREATE name roomKey` / `JOIN name proof` | `roomKey` = `RoomKey(pw, name)` oder leer; `proof` = `AuthProof(roomKey, nonce)` |
+| S→C | `JOINED name` / `ROOMLEFT grund` | in einen Raum / zurück in die Raumliste |
+| C→S | `LEAVEROOM` / `ROOMPW roomKey` / `KICK id` | Raum verlassen / Host: Passwort setzen (leer = aus) / Host: Spieler oder Bot entfernen |
+| S→C | `LOBBY room hostId state botLevel locked player*` | `player` = `id\|INI\|char\|status\|score\|bot` |
 | C→S | `CHAR characterId` | Figur in der Lobby ändern |
 | C→S | `BOT ADD` / `BOT REMOVE` / `BOT LEVEL n` | nur Host, nur in der Lobby |
 | C→S | `START discipline` | nur Host |
@@ -268,7 +282,9 @@ Bei inkompatiblen Änderungen `Protocol.Version` erhöhen; der Server lehnt ande
 | Grenze | Standard |
 | --- | --- |
 | Spieler pro Raum | 2–4 (Bots zählen mit) |
-| Handshake / Idle | 15 s / 30 s |
+| Handshake / Idle | 15 s (15 min beim Lesen der Rechtstexte) / 30 s, Client-Ping alle 5 s |
+| Räume / Verbindungen pro IP | unbegrenzt, mit `--public` 50 / 3 |
+| Nachrichten pro Verbindung | 30 pro Sekunde |
 | Warten auf `READY` aller | 60 s, danach `GO` für die Bereiten |
 | maximale Rundendauer | 20 min, Unfertige bekommen 0 |
 | Passwort-Fehlversuche | 5 in 5 min pro IP, danach Sperre |
@@ -293,12 +309,31 @@ Referenz ist der Median der letzten echten Ergebnisse dieser Disziplin auf dem S
 (offline: der lokalen Bestenliste), ohne Daten 1050 (Mitte der Startwerte der
 Spiel-Bestenliste 600–1500).
 
-### Passwort
+### Passwörter
 
-Challenge-Response: pro Verbindung eine zufällige Nonce, der Client antwortet mit
-`HMAC-SHA256(key=Passwort, msg=Nonce)` als Hex; Vergleich mit
-`CryptographicOperations.FixedTimeEquals`. Das Passwort geht nie über die Leitung; gegen
-Mitschnitt schwacher Passwörter hilft nur ein starkes Passwort oder ein VPN.
+Server- und Raum-Passwörter: Der Client rechnet `ServerKey(pw)` bzw. `RoomKey(pw, raum)` =
+PBKDF2-HMAC-SHA256 (30 000 Runden, Salt `ogmp-server:v1` bzw. `ogmp-room:<raum>`) und schickt
+`AuthProof(key, nonce)` = HMAC-SHA256 mit der Verbindungs-Nonce. Der Server hält nur Schlüssel
+(Vergleich mit `CryptographicOperations.FixedTimeEquals`), leitet `--password-file` beim Start
+sofort ab, speichert per Konsole gesetzte Passwörter nur als Schlüssel (alte Klartext-Einträge
+werden beim Laden migriert) und maskiert `password …` im Log.
+
+PBKDF2 ist in `Protocol.Pbkdf2Sha256` selbst implementiert: Das Mono des Spiels ignoriert das
+Hash-Argument von `Rfc2898DeriveBytes` (Ergebnis wäre PBKDF2-SHA1). Ein Test prüft gegen den
+RFC-7914-Testvektor und gegen .NET.
+
+### Raumliste und Public-Modus
+
+Nach `HELLO` ohne Raum ist ein Client in der Raumliste (`Authed`, aber `Room == null`).
+`CREATE`/`JOIN`/`LEAVEROOM`/`KICK` laufen über `JoinRoom`/`LeaveRoom` in `Server.cs`; Räume ohne
+Menschen schließen sich. Die Raumliste wird nur bei Änderungen an alle Clients in der
+Raumliste geschickt (Vergleich mit der zuletzt gesendeten Zeile).
+
+`--public` verlangt Impressum + Datenschutz (`LoadDocuments`, max. ca. 60 000 Zeichen je
+Text), setzt Standardgrenzen (50 Räume, 3 Verbindungen/IP) und maskiert IPs im Log
+(`LogAddress`). Wer vor `HELLO` einen Rechtstext anfordert (`DOC`), bekommt 15 Minuten statt
+15 Sekunden Handshake-Zeit zum Lesen. `HELLO` wird ohne passenden `consent`-Hash abgelehnt.
+Pro Verbindung gilt ein Limit von 30 Nachrichten/Sekunde (`Kick`).
 
 ### Admin-Konsole und State-Datei
 
