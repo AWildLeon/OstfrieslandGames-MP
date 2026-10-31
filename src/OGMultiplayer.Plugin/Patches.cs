@@ -191,6 +191,19 @@ namespace OGMultiplayer.Plugin
     }
 
     /// <summary>
+    /// The pause menu hides every other text on screen. Our HUD stays while only the pause menu
+    /// is open in an online round, so a paused player sees how long the others still wait.
+    /// </summary>
+    [HarmonyPatch(typeof(IngameSettingsHudVisibility), "Hide")]
+    internal static class PauseHudVisibilityPatch
+    {
+        private static bool Prefix(UnityEngine.UI.Graphic graphic)
+        {
+            return !(OnlineHud.ShowOverPause && graphic != null && graphic.GetComponentInParent<OnlineHud>(true) != null);
+        }
+    }
+
+    /// <summary>
     /// The start screen camera scrolls back to the logo on Back; it skips that during hot seat,
     /// and does the same while an online page is open (so leaving a page stays in the menu).
     /// </summary>

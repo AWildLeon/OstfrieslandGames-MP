@@ -178,6 +178,8 @@ Konsole starten, Admin-Befehle dort eintippen) gibt es unter
 
 Optionen: `--port` (Standard 27420), `--bind` (Standard 0.0.0.0),
 `--ready-timeout <s>` (wie lange auf langsame Spieler gewartet wird, Standard 60),
+`--pause-grace <s>` (so lange darf eine Pause die anderen aufhalten, wenn alle anderen fertig
+sind; danach zählt der letzte Stand, Standard 60),
 `--match-timeout <min>` (maximale Rundendauer, Standard 20),
 `--password-file <pfad>` (Server-Passwort, erste Zeile der Datei),
 `--state-file <pfad>` (Bans und Admin-Passwort, Standard `./ogmultiplayer-state.json`),

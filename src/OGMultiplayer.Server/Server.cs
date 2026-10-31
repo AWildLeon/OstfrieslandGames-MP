@@ -18,6 +18,12 @@ public sealed class ServerOptions
     public int Port { get; set; } = Protocol.DefaultPort;
     public TimeSpan ReadyTimeout { get; set; } = TimeSpan.FromSeconds(60);
     public TimeSpan MatchTimeout { get; set; } = TimeSpan.FromMinutes(20);
+
+    /// <summary>
+    /// How long a paused player may keep the others waiting once nobody else is playing.
+    /// Only time spent paused counts; when it is used up, the last live score counts.
+    /// </summary>
+    public TimeSpan PauseGrace { get; set; } = TimeSpan.FromSeconds(60);
     public TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(30);
     public int MaxConnections { get; set; } = 256;
     public TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(15);
@@ -377,7 +383,8 @@ public sealed partial class GameServer
                 Log($"[{room.Name}] match {m.Id}: ready timeout, starting without everyone");
                 SendGo(room, m);
             }
-            if (now - m.BeganAt > options.MatchTimeout)
+            TickPauses(room, m, now);
+            if (room.Match == m && now - m.BeganAt > options.MatchTimeout)
             {
                 Log($"[{room.Name}] match {m.Id}: match timeout");
                 foreach (Participant p in m.Participants.Where(p => !p.Finished))
@@ -448,6 +455,9 @@ public sealed partial class GameServer
                 break;
             case Protocol.Ready:
                 HandleReady(client, room, f);
+                break;
+            case Protocol.Pause:
+                HandlePause(client, room, f);
                 break;
             case Protocol.Live:
                 HandleLive(client, room, f);
@@ -937,6 +947,76 @@ public sealed partial class GameServer
         BroadcastLobby(room);
     }
 
+    private void HandlePause(Client client, Room room, string[] f)
+    {
+        Participant? p = ParticipantFor(client, room, f);
+        if (p == null || p.Finished || f.Length < 3 || (p.Status != Protocol.StatusPlaying && p.Status != Protocol.StatusPaused))
+        {
+            return;
+        }
+        string status = f[2] == "1" ? Protocol.StatusPaused : Protocol.StatusPlaying;
+        if (status == p.Status)
+        {
+            return;
+        }
+        p.Status = status;
+        p.PauseAccruedAt = DateTime.UtcNow;
+        BroadcastLobby(room);
+    }
+
+    /// <summary>
+    /// A paused player uses up PauseGrace only while nobody else is still playing, so a
+    /// pause cannot hold the room forever. When it is used up, the last live score counts.
+    /// </summary>
+    private void TickPauses(Room room, Match m, DateTime now)
+    {
+        if (!m.GoSent || !m.Participants.Any(x => x.Finished))
+        {
+            return;
+        }
+        bool counting = m.Participants.All(x => x.Finished || x.Status == Protocol.StatusPaused);
+        bool changed = false;
+        foreach (Participant p in m.Participants.Where(x => x.Status == Protocol.StatusPaused))
+        {
+            if (counting)
+            {
+                int before = GraceLeftSeconds(p);
+                p.PauseUsed += now - p.PauseAccruedAt;
+                changed |= GraceLeftSeconds(p) != before;
+                if (p.PauseUsed >= options.PauseGrace)
+                {
+                    p.Status = Protocol.StatusDone;
+                    RememberHumanScore(m.Discipline, p.Score);
+                    Log($"[{room.Name}] match {m.Id}: {p.Initials} paused too long, counts with {p.Score}");
+                    changed = true;
+                }
+            }
+            p.PauseAccruedAt = now;
+        }
+        if (changed)
+        {
+            CheckFinished(room, m);
+        }
+    }
+
+    private int GraceLeftSeconds(Participant p)
+    {
+        double left = (options.PauseGrace - p.PauseUsed).TotalSeconds;
+        return Math.Max(0, (int)Math.Ceiling(left));
+    }
+
+    /// <summary>Remaining pause grace for the lobby line, empty while it is not running down.</summary>
+    private string GraceField(Match? m, Participant? p)
+    {
+        if (m == null || p == null || p.Status != Protocol.StatusPaused || !m.GoSent
+            || !m.Participants.Any(x => x.Finished)
+            || !m.Participants.All(x => x.Finished || x.Status == Protocol.StatusPaused))
+        {
+            return string.Empty;
+        }
+        return Protocol.Int(GraceLeftSeconds(p));
+    }
+
     private void HandleLive(Client client, Room room, string[] f)
     {
         Participant? p = ParticipantFor(client, room, f);
@@ -1129,7 +1209,10 @@ public sealed partial class GameServer
             Participant? p = room.Match?.Find(member);
             string status = p?.Status ?? Protocol.StatusLobby;
             int score = p?.Score ?? 0;
-            fields.Add(Protocol.Join(Protocol.Int(member.Id), member.Initials, member.Character, status, Protocol.Int(score), member.IsBot ? "1" : "0"));
+            string grace = GraceField(room.Match, p);
+            fields.Add(grace.Length == 0
+                ? Protocol.Join(Protocol.Int(member.Id), member.Initials, member.Character, status, Protocol.Int(score), member.IsBot ? "1" : "0")
+                : Protocol.Join(Protocol.Int(member.Id), member.Initials, member.Character, status, Protocol.Int(score), member.IsBot ? "1" : "0", grace));
         }
         string line = Protocol.Encode(fields.ToArray());
         foreach (Client member in room.Members)
@@ -1351,5 +1434,9 @@ internal sealed class Participant
     public TimeSpan BotDuration { get; set; }
     public DateTime BotStartedAt { get; set; }
     public int Score { get; set; }
+
+    /// <summary>Pause time used up while nobody else was playing.</summary>
+    public TimeSpan PauseUsed { get; set; }
+    public DateTime PauseAccruedAt { get; set; }
     public bool Finished => Status == Protocol.StatusDone || Status == Protocol.StatusLeft;
 }

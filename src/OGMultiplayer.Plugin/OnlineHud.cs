@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using OstfrieslandGames.Padstockspringen;
 using UnityEngine;
@@ -34,6 +35,10 @@ namespace OGMultiplayer.Plugin
         private Font font;
 
         private static OnlineSession Session => OnlineSession.Instance;
+
+        /// <summary>Own round paused and only the pause menu open (not its settings or how-to pages).</summary>
+        public static bool ShowOverPause => Session != null && Session.LocallyPaused
+            && !IngameSettingsOverlay.BlocksInput && !HowToPlayPauseOverlay.BlocksInput;
 
         private void Start()
         {
@@ -113,7 +118,30 @@ namespace OGMultiplayer.Plugin
             }
 
             string center = null;
-            if (Session.WaitingForGo)
+            int myGrace = Session.MyGraceLeft;
+            LobbyPlayer pausing = Session.Lobby.FirstOrDefault(p => p.Id != Session.MyId && p.Status == Protocol.StatusPaused);
+            // the game's pause menu sits on top (order 5000) and hides other texts; the
+            // countdown must show over it (texts hidden while a settings page was open come back)
+            bool overPause = ShowOverPause;
+            canvas.sortingOrder = overPause ? 5001 : 900;
+            if (overPause)
+            {
+                foreach (Graphic g in canvas.GetComponentsInChildren<Graphic>(true))
+                {
+                    g.canvasRenderer.SetAlpha(1f);
+                }
+            }
+            if (myGrace >= 0)
+            {
+                center = $"NOCH {myGrace} S PAUSE, DANN ZÄHLT DEIN STAND";
+            }
+            else if (Session.WaitingForResults && pausing != null)
+            {
+                center = pausing.GraceLeft >= 0
+                    ? $"{pausing.Initials} PAUSIERT - NOCH {pausing.GraceLeft} S, DANN ZÄHLT DER STAND"
+                    : $"{pausing.Initials} PAUSIERT ...";
+            }
+            else if (Session.WaitingForGo)
             {
                 center = "WARTE AUF DIE ANDEREN SPIELER ...";
             }
@@ -123,6 +151,10 @@ namespace OGMultiplayer.Plugin
                 center = "FERTIG! WARTE AUF DIE ANDEREN ...  (PAUSE > "
                     + GameLocalization.GetOrDefault("ui.pause.backToStart", "ZUM START").ToUpperInvariant() + ": ZUR LOBBY)";
             }
+            // over the pause menu the title is at the top, so the countdown goes below its items
+            float bannerY = myGrace >= 0 ? -200f : 300f;
+            bannerBackdrop.rectTransform.anchoredPosition = new Vector2(0f, bannerY);
+            banner.rectTransform.anchoredPosition = new Vector2(0f, bannerY);
             SetBox(bannerBackdrop, banner, center);
             // over the menu the title area is taken, so messages go to the bottom there
             float toastY = menuOpen ? -338f : 236f;
@@ -200,6 +232,8 @@ namespace OGMultiplayer.Plugin
                     return "BEREIT";
                 case Protocol.StatusPlaying:
                     return p.Score > 0 ? "SPIELT " + p.Score : "SPIELT";
+                case Protocol.StatusPaused:
+                    return p.GraceLeft >= 0 ? $"PAUSE {p.GraceLeft} S" : "PAUSE";
                 case Protocol.StatusDone:
                     return "FERTIG " + p.Score;
                 case Protocol.StatusLeft:

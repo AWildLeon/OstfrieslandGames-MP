@@ -14,6 +14,9 @@ namespace OGMultiplayer.Plugin
         public string Status;
         public int Score;
         public bool IsBot;
+
+        /// <summary>Seconds until a paused player's live score counts; -1 while not running down.</summary>
+        public int GraceLeft = -1;
     }
 
     internal sealed class RoomInfo
@@ -63,6 +66,7 @@ namespace OGMultiplayer.Plugin
         private bool turnStarted;
         public bool LocalFinished { get; private set; }
         private bool leftMatch;
+        private bool pauseSent;
 
         // feedback
         public string Message { get; private set; }
@@ -94,6 +98,12 @@ namespace OGMultiplayer.Plugin
         public bool WaitingForGo => MatchRunning && !GoReceived && controller.Phase == HotSeatPhase.Handoff;
 
         public bool WaitingForResults => MatchRunning && LocalFinished;
+
+        /// <summary>The game's pause menu is open during the own running turn.</summary>
+        public bool LocallyPaused => MatchRunning && GoReceived && !LocalFinished && PauseManager.IsAnyPaused;
+
+        /// <summary>Seconds the others still wait for my pause, -1 while that is not running down.</summary>
+        public int MyGraceLeft => LocallyPaused ? Lobby.FirstOrDefault(p => p.Id == MyId)?.GraceLeft ?? -1 : -1;
 
         private void Awake()
         {
@@ -555,6 +565,13 @@ namespace OGMultiplayer.Plugin
                 turnStarted = true;
                 RunAuthorized(controller.StartTurn);
             }
+            // the others see the pause; it only holds them for the server's grace time
+            bool paused = LocallyPaused && controller.Phase == HotSeatPhase.Playing;
+            if (paused != pauseSent && GoReceived && !LocalFinished)
+            {
+                pauseSent = paused;
+                Send(Protocol.Pause, Protocol.Int(MatchId), paused ? "1" : "0");
+            }
             if (controller.Phase == HotSeatPhase.Playing && !LocalFinished && Time.unscaledTime - lastLive > 1f)
             {
                 lastLive = Time.unscaledTime;
@@ -691,7 +708,8 @@ namespace OGMultiplayer.Plugin
                     continue;
                 }
                 Protocol.TryInt(p[4], out int score);
-                Lobby.Add(new LobbyPlayer { Id = pid, Initials = p[1], Character = p[2], Status = p[3], Score = score, IsBot = p.Length > 5 && p[5] == "1" });
+                int grace = p.Length > 6 && Protocol.TryInt(p[6], out int g) ? g : -1;
+                Lobby.Add(new LobbyPlayer { Id = pid, Initials = p[1], Character = p[2], Status = p[3], Score = score, IsBot = p.Length > 5 && p[5] == "1", GraceLeft = grace });
             }
         }
 
@@ -722,6 +740,7 @@ namespace OGMultiplayer.Plugin
             turnStarted = false;
             LocalFinished = false;
             leftMatch = false;
+            pauseSent = false;
             lastLiveScore = -1;
 
             if (RunFlowController.IsActive)
@@ -793,6 +812,17 @@ namespace OGMultiplayer.Plugin
                 string summary = string.Join(", ", Lobby.Select(p => $"{p.Initials} {(scores.TryGetValue(p.Id, out int s) ? s : 0)}"));
                 Toast("Ergebnis: " + summary, 8f);
                 return;
+            }
+            if (!LocalFinished && GoReceived)
+            {
+                // the server ended the round while we were still in it (pause ran out)
+                PauseManager pause = UnityEngine.Object.FindAnyObjectByType<PauseManager>();
+                if (pause != null && pause.IsPaused)
+                {
+                    pause.SetPaused(false);
+                }
+                LocalFinished = true;
+                Toast("Die Pause war zu lang - dein letzter Stand zählt.", 6f);
             }
             HotSeatMatch match = controller.Match;
             int guard = 0;

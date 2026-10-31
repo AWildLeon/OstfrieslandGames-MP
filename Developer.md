@@ -264,7 +264,7 @@ UTF-8-Zeile, Felder durch Tab getrennt, Unterfelder durch `|`. Version: **1**.
 | C→S | `CREATE name roomKey` / `JOIN name proof` | `roomKey` = `RoomKey(pw, name)` oder leer; `proof` = `AuthProof(roomKey, nonce)` |
 | S→C | `JOINED name` / `ROOMLEFT grund` | in einen Raum / zurück in die Raumliste |
 | C→S | `LEAVEROOM` / `ROOMPW roomKey` / `KICK id` | Raum verlassen / Host: Passwort setzen (leer = aus) / Host: Spieler oder Bot entfernen |
-| S→C | `LOBBY room hostId state botLevel locked player*` | `player` = `id\|INI\|char\|status\|score\|bot` |
+| S→C | `LOBBY room hostId state botLevel locked player*` | `player` = `id\|INI\|char\|status\|score\|bot[\|graceLeft]`; `status` `paused` bei offener Pause, `graceLeft` = Sekunden, bis ihr Live-Stand zählt (nur solange niemand sonst spielt) |
 | C→S | `CHAR characterId` | Figur in der Lobby ändern |
 | C→S | `BOT ADD` / `BOT REMOVE` / `BOT LEVEL n` | nur Host, nur in der Lobby |
 | C→S | `START discipline` | nur Host |
@@ -272,6 +272,7 @@ UTF-8-Zeile, Felder durch Tab getrennt, Unterfelder durch `|`. Version: **1**.
 | C→S | `READY matchId` | Client wartet am Rundenstart |
 | S→C | `GO matchId` | alle bereit (oder Ready-Timeout) |
 | C→S | `LIVE matchId score` | Live-Punkte (Padstock, Bosseln, Krabbenpulen) |
+| C→S | `PAUSE matchId 0\|1` | Pausemenü des Spiels geöffnet/geschlossen (eigene laufende Runde) |
 | C→S | `SCORE matchId score` / `LEAVE matchId` | Runde fertig / abgebrochen (0 Punkte) |
 | S→C | `RESULT matchId id\|score*` | alle fertig |
 | S→C | `MSG text` | Admin-Nachricht |
@@ -308,6 +309,14 @@ aktuellen Mitgliedern an; wer später kommt, wartet bis zur nächsten Runde. Ver
 Spieler die Runde oder trennt die Verbindung, bekommt er 0 Punkte. Sobald alle fertig sind,
 geht `RESULT` an alle Mitglieder und der Raum ist wieder in der Lobby. Räume ohne Menschen
 werden geschlossen.
+
+Pausen: Der Client meldet das Pausemenü des Spiels (`PauseManager.IsAnyPaused`) mit
+`PAUSE`. Solange noch jemand anderes spielt, kostet eine Pause nichts. Spielt niemand
+mehr (alle anderen fertig oder ebenfalls pausiert), läuft das Pausenbudget
+(`--pause-grace`, Standard 60 s) ab; nur pausierte Zeit zählt, Weiterspielen hält den
+Countdown an. Ist es aufgebraucht, zählt der letzte `LIVE`-Stand als Ergebnis, `RESULT`
+geht an alle, und der Client schließt die Pause und zeigt das Ergebnis. Der Countdown
+steht bei allen im HUD, beim Pausierenden über dem Pausemenü.
 
 ### Bots
 

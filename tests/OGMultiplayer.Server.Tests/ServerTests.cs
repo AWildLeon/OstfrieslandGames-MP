@@ -271,6 +271,38 @@ public class ServerTests
     }
 
     [Fact]
+    public async Task PauseOnlyHoldsOthersForTheGraceTime()
+    {
+        await using var fx = new ServerFixture(configure: o => o.PauseGrace = TimeSpan.FromSeconds(2));
+        using var host = fx.Connect();
+        using var guest = fx.Connect();
+        host.Hello("HST");
+        guest.Hello("GST");
+        host.Send(Protocol.Start, "0");
+        string matchId = host.Next(Protocol.Begin)[1];
+        host.Send(Protocol.Ready, matchId);
+        guest.Send(Protocol.Ready, matchId);
+        host.Next(Protocol.Go);
+        guest.Send(Protocol.Live, matchId, "450");
+        guest.Send(Protocol.Pause, matchId, "1");
+        // while the host still plays, the pause costs nothing
+        Thread.Sleep(2500);
+        fx.AdminEventually("status", _ => true);
+        host.Send(Protocol.Score, matchId, "900");
+        string[] lobby;
+        do
+        {
+            lobby = host.Next(Protocol.Lobby);
+        }
+        while (!lobby.Any(x => x.StartsWith($"{guest.Id}|GST|tim|{Protocol.StatusPaused}|450|0|")));
+        string grace = lobby.First(x => x.StartsWith($"{guest.Id}|")).Split('|')[6];
+        Assert.True(int.Parse(grace) >= 1, "grace " + grace);
+        string[] result = host.Next(Protocol.Result);
+        Assert.Contains($"{host.Id}|900", result);
+        Assert.Contains($"{guest.Id}|450", result);
+    }
+
+    [Fact]
     public async Task RoomIsLimitedToFourPlayers()
     {
         await using var fx = new ServerFixture();

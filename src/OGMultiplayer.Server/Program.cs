@@ -69,6 +69,14 @@ for (int i = 0; i < args.Length; i++)
             options.ReadyTimeout = TimeSpan.FromSeconds(rt);
             i++;
             break;
+        case "--pause-grace":
+            if (next == null || !Protocol.TryInt(next, out int pg) || pg < 0)
+            {
+                return Fail("--pause-grace braucht Sekunden");
+            }
+            options.PauseGrace = TimeSpan.FromSeconds(pg);
+            i++;
+            break;
         case "--match-timeout":
             if (next == null || !Protocol.TryInt(next, out int mt) || mt < 1)
             {
@@ -182,6 +190,7 @@ for (int i = 0; i < args.Length; i++)
                   -p, --port <port>          TCP-Port (Standard 27420, Env OGMP_PORT)
                   -b, --bind <ip>            Bind-Adresse (Standard 0.0.0.0, Env OGMP_BIND)
                       --ready-timeout <s>    Max. Wartezeit auf alle Spieler vor dem Start (Standard 60)
+                      --pause-grace <s>      So lange darf eine Pause die anderen aufhalten (Standard 60)
                       --match-timeout <min>  Max. Dauer einer Runde (Standard 20)
                       --password-file <pfad> Server-Passwort aus Datei (erste Zeile; Env OGMP_PASSWORD_FILE)
                                              Alternativ Env OGMP_PASSWORD. Ohne Passwort ist der Server offen.

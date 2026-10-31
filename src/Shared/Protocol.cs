@@ -36,6 +36,7 @@ namespace OGMultiplayer
     ///   LIVE     matchId score              (optional live score while playing)
     ///   SCORE    matchId score              (turn finished)
     ///   LEAVE    matchId                    (aborted the running match)
+    ///   PAUSE    matchId 0|1                (game paused / resumed during the own turn)
     ///   CHAR     characterId                (change character while in lobby)
     ///   BOT      ADD | REMOVE | LEVEL n     (host only, while in lobby)
     ///   PING
@@ -49,7 +50,10 @@ namespace OGMultiplayer
     ///   JOINED   room
     ///   ROOMLEFT reason                     (back in the room browser)
     ///   ERROR    message
-    ///   LOBBY    room hostId state botLevel player*  (player = id|INI|char|status|score|bot)
+    ///   LOBBY    room hostId state botLevel locked player*
+    ///            (player = id|INI|char|status|score|bot|graceLeft; status "paused" while the
+    ///            game is paused; graceLeft = seconds until a paused player's live score
+    ///            counts, only while nobody else is still playing, else left out)
     ///   BEGIN    matchId discipline player* (player = id|INI|char)
     ///   GO       matchId
     ///   RESULT   matchId score*             (score = id|points)
@@ -80,6 +84,7 @@ namespace OGMultiplayer
         public const string Live = "LIVE";
         public const string Score = "SCORE";
         public const string Leave = "LEAVE";
+        public const string Pause = "PAUSE";
         public const string Char = "CHAR";
         public const string Ping = "PING";
         public const string Doc = "DOC";
@@ -114,6 +119,7 @@ namespace OGMultiplayer
         public const string StatusLoading = "loading";
         public const string StatusReady = "ready";
         public const string StatusPlaying = "playing";
+        public const string StatusPaused = "paused";
         public const string StatusDone = "done";
         public const string StatusLeft = "left";
 
