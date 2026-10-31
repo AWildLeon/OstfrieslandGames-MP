@@ -246,8 +246,11 @@ der Beobachtete fertig ist oder jemand 5 s lang 15 % vorne liegt). Statt Video o
 Eingaben wird der **Szenenzustand** übertragen (`SceneMirror.cs`):
 
 - Beide Seiten laden dieselbe Disziplin-Szene. Objekte werden über ihren Hierarchiepfad
-  (`/Name#n/Kind#n`, `n` zählt gleichnamige Geschwister) zugeordnet; Pausemenü und seine
-  Seiten sind ausgenommen.
+  (`/Name#n/Kind#n`, `n` zählt gleichnamige Geschwister) zugeordnet. Ausgenommen sind
+  Pausemenü und seine Seiten sowie Eingabe-Hinweise, die für Zuschauer nur verwirrend wären
+  (`Mirror.IsPrompt`: vom Spiel als `IngameHudHint` markiert, Bosseln-Wurfanzeige mit
+  Kraftbalken, Bildschirm-Texte des Spiels); der Zuschauer blendet seine eigenen aus.
+  Punkte und Herzen bleiben.
 - Der Spieler merkt sich zwei Frames nach dem Laden den Ausgangszustand und sendet bis zu 10×/s
   nur Abweichungen: lokale Position/Rotation/Skalierung, aktiv, Sprite/Farbe/Flip/enabled von
   `SpriteRenderer`/`Image`/`Text`, `sizeDelta`, Kamera-`orthographicSize`. Werte sind

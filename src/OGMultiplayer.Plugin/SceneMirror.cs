@@ -42,11 +42,62 @@ namespace OGMultiplayer.Plugin
         /// <summary>The discipline's scene, as the game itself names it.</summary>
         public static string SceneFor(DisciplineId discipline) => GameBridge.GameScene(discipline);
 
-        /// <summary>Menus on top of the game are local (pause menu and its pages).</summary>
+        /// <summary>Menus on top of the game are local (pause menu and its pages), and so are input prompts.</summary>
         public static bool Excluded(Transform t)
         {
             return t.GetComponent<PauseMenuView>() != null || t.GetComponent<IngameSettingsOverlay>() != null
-                || t.GetComponent<HowToPlayPauseOverlay>() != null;
+                || t.GetComponent<HowToPlayPauseOverlay>() != null || IsPrompt(t);
+        }
+
+        private static readonly HashSet<int> promptRoots = new HashSet<int>();
+        private static int promptScene = -1;
+
+        /// <summary>
+        /// Input prompts make no sense for someone who only watches ("press as fast as you
+        /// can", key caps, the throw power bar): what the game itself marks as a HUD hint, the
+        /// Bosseln throw display, and the game's own screen texts. Score and hearts stay.
+        /// </summary>
+        public static bool IsPrompt(Transform t)
+        {
+            int handle = t.gameObject.scene.handle;
+            if (handle != promptScene)
+            {
+                promptScene = handle;
+                promptRoots.Clear();
+                foreach (BosselnWurfStakkato stakkato in UnityEngine.Object.FindObjectsByType<BosselnWurfStakkato>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (stakkato.anzeigeRoot != null)
+                    {
+                        promptRoots.Add(stakkato.anzeigeRoot.GetInstanceID());
+                    }
+                }
+            }
+            if (promptRoots.Contains(t.GetInstanceID()) || t.GetComponent<IngameHudHint>() != null)
+            {
+                return true;
+            }
+            if (t.GetComponent<Text>() == null)
+            {
+                return false;
+            }
+            Canvas canvas = t.GetComponentInParent<Canvas>();
+            return canvas != null && canvas.renderMode != RenderMode.WorldSpace;
+        }
+
+        /// <summary>Hides the watcher's own prompts (they are never streamed).</summary>
+        public static void HidePrompts(Scene scene)
+        {
+            promptScene = -1;
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
+                {
+                    if (IsPrompt(t))
+                    {
+                        t.gameObject.SetActive(false);
+                    }
+                }
+            }
         }
 
         /// <summary>Visits every transform of the scene with its path (name#n per level, n counts equal names).</summary>
@@ -734,6 +785,7 @@ namespace OGMultiplayer.Plugin
             }
             scene = loaded;
             Freeze(scene);
+            Mirror.HidePrompts(scene);
             paths.Clear();
             Mirror.Walk(scene, (t, path) => paths[path] = t);
             ready = true;
