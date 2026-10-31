@@ -19,8 +19,8 @@ Für Spieler und Server-Betreiber reicht die [README](README.md).
 | **Lobby als Host**: Mitspieler, Server-Bot, Raum-Passwort, Spieler entfernen | **Laufende Runde** mit Spielerliste (`OnlineHud`) |
 | ![Ergebnis](docs/screenshots/07-ergebnis.png) | ![Datenschutz](docs/screenshots/08-datenschutz.png) |
 | **Ergebnis** im Original-Bildschirm | **Datenschutzhinweise** eines Public-Servers vor dem Beitritt (*Legal*) |
-| ![Raumliste](docs/screenshots/09-raumliste.png) | |
-| **Raumliste** mit MOTD und passwortgeschütztem Raum (*Rooms*) | |
+| ![Raumliste](docs/screenshots/09-raumliste.png) | ![Zuschauen](docs/screenshots/10-zuschauen.png) |
+| **Raumliste** mit MOTD und passwortgeschütztem Raum (*Rooms*) | **Zuschauen**: links der Spieler, rechts der fertige Mitspieler mit gespiegelter Szene (`SceneMirror`) |
 
 Alle Bilder stammen aus automatisierten Testläufen (Xvfb, siehe [Testen](#testen)).
 
