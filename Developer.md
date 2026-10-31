@@ -249,8 +249,12 @@ Eingaben wird der **Szenenzustand** übertragen (`SceneMirror.cs`):
   (`/Name#n/Kind#n`, `n` zählt gleichnamige Geschwister) zugeordnet. Ausgenommen sind
   Pausemenü und seine Seiten sowie Eingabe-Hinweise, die für Zuschauer nur verwirrend wären
   (`Mirror.IsPrompt`: vom Spiel als `IngameHudHint` markiert, Bosseln-Wurfanzeige mit
-  Kraftbalken, Bildschirm-Texte des Spiels); der Zuschauer blendet seine eigenen aus.
-  Punkte und Herzen bleiben.
+  Kraftbalken und Aufforderung); der Zuschauer blendet seine eigenen aus. Andere Texte,
+  Punkte und Herzen bleiben. Ein einzelner Eintrag über `MaxViewChars` wird nie gesendet
+  (Texte werden auf 400 Zeichen gekürzt), damit der Server den Spieler nicht wegen einer zu
+  langen Zeile trennt. Der Server leitet `VIEW` nur weiter, solange die Warteschlange des
+  Zuschauers kurz ist (sonst verdrängten sie `GO`/`RESULT`); hat er Zeilen ausgelassen,
+  fordert er beim Spieler einen Vollstand an.
 - Der Spieler merkt sich zwei Frames nach dem Laden den Ausgangszustand und sendet bis zu 10×/s
   nur Abweichungen: lokale Position/Rotation/Skalierung, aktiv, Sprite/Farbe/Flip/enabled von
   `SpriteRenderer`/`Image`/`Text`, `sizeDelta`, Kamera-`orthographicSize`. Werte sind

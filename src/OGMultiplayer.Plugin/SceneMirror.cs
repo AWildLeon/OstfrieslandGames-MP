@@ -54,8 +54,8 @@ namespace OGMultiplayer.Plugin
 
         /// <summary>
         /// Input prompts make no sense for someone who only watches ("press as fast as you
-        /// can", key caps, the throw power bar): what the game itself marks as a HUD hint, the
-        /// Bosseln throw display, and the game's own screen texts. Score and hearts stay.
+        /// can", key caps, the throw power bar): what the game itself marks as a HUD hint and
+        /// the Bosseln throw display with its prompt. Other texts may be part of the play and stay.
         /// </summary>
         public static bool IsPrompt(Transform t)
         {
@@ -70,18 +70,13 @@ namespace OGMultiplayer.Plugin
                     {
                         promptRoots.Add(stakkato.anzeigeRoot.GetInstanceID());
                     }
+                    if (stakkato.promptText != null)
+                    {
+                        promptRoots.Add(stakkato.promptText.transform.GetInstanceID());
+                    }
                 }
             }
-            if (promptRoots.Contains(t.GetInstanceID()) || t.GetComponent<IngameHudHint>() != null)
-            {
-                return true;
-            }
-            if (t.GetComponent<Text>() == null)
-            {
-                return false;
-            }
-            Canvas canvas = t.GetComponentInParent<Canvas>();
-            return canvas != null && canvas.renderMode != RenderMode.WorldSpace;
+            return promptRoots.Contains(t.GetInstanceID()) || t.GetComponent<IngameHudHint>() != null;
         }
 
         /// <summary>Hides the watcher's own prompts (they are never streamed).</summary>
@@ -430,6 +425,13 @@ namespace OGMultiplayer.Plugin
                 {
                     continue;
                 }
+                if (record.Length > Protocol.MaxViewChars)
+                {
+                    // never send a line the server would refuse (and drop the player for)
+                    Plugin.Log.LogWarning($"Zuschauer-Spiegel: Eintrag zu lang ({record.Length} Zeichen), übersprungen: {e.Path}");
+                    Commit(e);
+                    continue;
+                }
                 if (record.Length > budget && records.Count > 0)
                 {
                     break;
@@ -460,6 +462,9 @@ namespace OGMultiplayer.Plugin
         }
 
         private MirrorSnap pending;
+
+        /// <summary>Longer texts are cut; nothing on screen needs more.</summary>
+        private const int MaxText = 400;
 
         private string Record(Ent e)
         {
@@ -567,7 +572,8 @@ namespace OGMultiplayer.Plugin
             }
             if (e.Txt != null && (all || !string.Equals(now.Text, old.Text, StringComparison.Ordinal)))
             {
-                line.Append(";t=").Append(Mirror.Esc(now.Text));
+                string text = now.Text ?? string.Empty;
+                line.Append(";t=").Append(Mirror.Esc(text.Length > MaxText ? text.Substring(0, MaxText) : text));
                 any = true;
             }
             pending = now;
@@ -679,6 +685,8 @@ namespace OGMultiplayer.Plugin
         private float loadedAt = -100f;
         private bool ready;
         private float keyAt;
+        private bool keyRetried;
+        private bool viewSeen;
         private string sceneName;
         private int matchId;
         private readonly int[] v3 = new int[3];
@@ -753,9 +761,13 @@ namespace OGMultiplayer.Plugin
                 Revert();
                 Watching = s.WatchTarget;
                 keyAt = 0f;
+                keyRetried = false;
+                viewSeen = false;
             }
-            if (keyAt == 0f || (ents.Count == 0 && Time.unscaledTime - keyAt > 3f))
+            // one request per watched player; a single retry if nothing at all arrived (lost on the way)
+            if (keyAt == 0f || (!viewSeen && !keyRetried && Time.unscaledTime - keyAt > 5f))
             {
+                keyRetried = keyAt != 0f;
                 keyAt = Time.unscaledTime;
                 s.SendMirror(Protocol.ViewKey, Protocol.Int(s.MatchId));
             }
@@ -863,6 +875,7 @@ namespace OGMultiplayer.Plugin
             proxies.Clear();
             paths.Clear();
             sprites = null;
+            misses.Clear();
         }
 
         /// <summary>Puts the scene back the way it was loaded (another player is watched now).</summary>
@@ -932,6 +945,7 @@ namespace OGMultiplayer.Plugin
             {
                 return;
             }
+            viewSeen = true;
             for (int i = 3; i < f.Length; i++)
             {
                 try
@@ -1280,7 +1294,8 @@ namespace OGMultiplayer.Plugin
             {
                 return null;
             }
-            if (sprites == null || (!sprites.ContainsKey(key) && Time.unscaledTime - spritesAt > 2f))
+            // a full scan only for keys not seen missing before, at most every 2 s
+            if (sprites == null || (!sprites.ContainsKey(key) && !misses.Contains(key) && Time.unscaledTime - spritesAt > 2f))
             {
                 spritesAt = Time.unscaledTime;
                 sprites = new Dictionary<string, Sprite>();

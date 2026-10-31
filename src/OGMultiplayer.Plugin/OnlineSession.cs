@@ -864,7 +864,7 @@ namespace OGMultiplayer.Plugin
                     pause.SetPaused(false);
                 }
                 LocalFinished = true;
-                Toast("Die Pause war zu lang - dein letzter Stand zählt.", 6f);
+                Toast(pauseSent ? "Die Pause war zu lang - dein letzter Stand zählt." : "Die Runde wurde beendet - dein letzter Stand zählt.", 6f);
             }
             HotSeatMatch match = controller.Match;
             int guard = 0;

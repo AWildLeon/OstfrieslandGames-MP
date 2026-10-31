@@ -709,7 +709,7 @@ namespace OGMultiplayer.Plugin
             switch (finished)
             {
                 case OnlineSetup.Purpose.Online:
-                    Show(Page.Connect, 3);
+                    Show(Page.Connect, 4); // "VERBINDEN"
                     break;
                 case OnlineSetup.Purpose.Bots:
                     Session.StartOffline(initials, Plugin.Character.Value);

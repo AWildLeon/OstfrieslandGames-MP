@@ -245,10 +245,11 @@ public sealed partial class GameServer
         var writer = Task.Run(() => client.WriteLoopAsync(CancellationToken.None));
         try
         {
-            using var reader = new StreamReader(client.Stream, new UTF8Encoding(false), false, 1024, leaveOpen: true);
+            using var reader = new StreamReader(client.Stream, new UTF8Encoding(false), false, 4096, leaveOpen: true);
+            var lines = new LineReader(reader);
             while (!token.IsCancellationRequested)
             {
-                string? line = await ReadLineLimitedAsync(reader, token);
+                string? line = await lines.ReadLineAsync(token);
                 if (line == null)
                 {
                     break;
@@ -295,30 +296,6 @@ public sealed partial class GameServer
             {
             }
             client.Tcp.Close();
-        }
-    }
-
-    private static async Task<string?> ReadLineLimitedAsync(StreamReader reader, CancellationToken token)
-    {
-        var sb = new StringBuilder();
-        var buffer = new char[1];
-        while (true)
-        {
-            int read = await reader.ReadAsync(buffer.AsMemory(0, 1), token);
-            if (read == 0)
-            {
-                return sb.Length > 0 ? sb.ToString() : null;
-            }
-            char c = buffer[0];
-            if (c == '\n')
-            {
-                return sb.ToString();
-            }
-            sb.Append(c);
-            if (sb.Length > Protocol.MaxLineLength)
-            {
-                throw new InvalidDataException("line too long");
-            }
         }
     }
 
@@ -1092,9 +1069,24 @@ public sealed partial class GameServer
         fields[1] = Protocol.Int(client.Id);
         Array.Copy(f, 2, fields, 2, f.Length - 2);
         string line = Protocol.Encode(fields);
+        bool resync = false;
         foreach (Client watcher in Watchers(room, m))
         {
-            watcher.Send(line);
+            if (!watcher.SendDroppable(line))
+            {
+                watcher.ViewDropped = true;
+            }
+            else if (watcher.ViewDropped && watcher.Outbox.Reader.Count < 4)
+            {
+                watcher.ViewDropped = false;
+                resync = true;
+            }
+        }
+        DateTime now = DateTime.UtcNow;
+        if (resync && now - m.LastFullState > TimeSpan.FromSeconds(2))
+        {
+            m.LastFullState = now;
+            client.Send(Protocol.Encode(Protocol.Stream, Protocol.Int(m.Id), "1"));
         }
     }
 
@@ -1498,6 +1490,22 @@ internal sealed class Client
         Outbox.Writer.TryWrite(line);
     }
 
+    /// <summary>
+    /// For lines that may be lost (scene mirror): skipped when the client lags behind, so
+    /// they never push important lines (GO, RESULT, ...) out of the bounded outbox.
+    /// </summary>
+    public bool SendDroppable(string line)
+    {
+        if (IsBot || Outbox.Reader.Count >= 32)
+        {
+            return false;
+        }
+        return Outbox.Writer.TryWrite(line);
+    }
+
+    /// <summary>A scene mirror line was skipped: the watcher needs a full state once it caught up.</summary>
+    public bool ViewDropped { get; set; }
+
     public void Close()
     {
         Closing = true;
@@ -1575,6 +1583,7 @@ internal sealed class Match
 
     /// <summary>The player the others watch (scene mirror), null = nobody.</summary>
     public Participant? StreamTarget { get; set; }
+    public DateTime LastFullState { get; set; }
     public DateTime TargetSince { get; set; }
 
     public Participant? Find(Client client) => Participants.FirstOrDefault(p => p.Client == client);
@@ -1604,4 +1613,60 @@ internal sealed class Participant
     public TimeSpan PauseUsed { get; set; }
     public DateTime PauseAccruedAt { get; set; }
     public bool Finished => Status == Protocol.StatusDone || Status == Protocol.StatusLeft;
+}
+
+/// <summary>
+/// Reads lines in chunks (scene mirror lines are long), at most Protocol.MaxLineLength
+/// characters each; a longer line is an error, like before.
+/// </summary>
+internal sealed class LineReader
+{
+    private readonly StreamReader reader;
+    private readonly char[] buffer = new char[4096];
+    private readonly StringBuilder line = new();
+    private int pos;
+    private int len;
+
+    public LineReader(StreamReader reader)
+    {
+        this.reader = reader;
+    }
+
+    public async Task<string?> ReadLineAsync(CancellationToken token)
+    {
+        while (true)
+        {
+            if (pos == len)
+            {
+                len = await reader.ReadAsync(buffer.AsMemory(), token);
+                pos = 0;
+                if (len == 0)
+                {
+                    if (line.Length == 0)
+                    {
+                        return null;
+                    }
+                    string rest = line.ToString();
+                    line.Clear();
+                    return rest;
+                }
+            }
+            int end = Array.IndexOf(buffer, '\n', pos, len - pos);
+            int take = (end < 0 ? len : end) - pos;
+            if (line.Length + take > Protocol.MaxLineLength)
+            {
+                throw new InvalidDataException("line too long");
+            }
+            line.Append(buffer, pos, take);
+            if (end < 0)
+            {
+                pos = len;
+                continue;
+            }
+            pos = end + 1;
+            string result = line.ToString();
+            line.Clear();
+            return result;
+        }
+    }
 }

@@ -331,6 +331,12 @@ public class ServerTests
         Assert.Equal(new[] { Protocol.Stream, matchId, "1" }, host.Next(Protocol.Stream));
         host.Send(Protocol.View, matchId, "1", "3;P=%2FCam%230;p=0,1,-10", "4;a=0");
         Assert.Equal(new[] { Protocol.View, Protocol.Int(host.Id), "1", "3;P=%2FCam%230;p=0,1,-10", "4;a=0" }, guest.Next(Protocol.View));
+        // long lines span several read buffers and arrive whole
+        string big = "5;t=" + new string('x', 11000);
+        host.Send(Protocol.View, matchId, "2", big);
+        host.Send(Protocol.View, matchId, "3", "6;a=1");
+        Assert.Equal(big, guest.Next(Protocol.View)[3]);
+        Assert.Equal("6;a=1", guest.Next(Protocol.View)[3]);
 
         // the target is done: the view moves on to the last one playing
         host.Send(Protocol.Score, matchId, "900");
@@ -359,6 +365,16 @@ public class ServerTests
         host.Send(Protocol.Score, matchId, "500");
         // no WATCH before the result: there was nobody the guest may watch
         Assert.Equal(Protocol.Result, guest.Next(Protocol.Watch, Protocol.Result)[0]);
+    }
+
+    [Fact]
+    public async Task OverlongLinesCloseTheConnection()
+    {
+        await using var fx = new ServerFixture();
+        using var c = fx.Connect();
+        c.Hello("HST");
+        c.Send(Protocol.Char, new string('a', Protocol.MaxLineLength + 10));
+        Assert.True(c.IsClosed());
     }
 
     [Fact]
@@ -689,6 +705,10 @@ public class RoomTests
         guest.Next(Protocol.RoomList);
 
         host.Send(Protocol.RoomPassword, string.Empty);
+        // two connections have no common order: join only once the room is open
+        while (host.Next(Protocol.Lobby)[5] != "0")
+        {
+        }
         guest.Send(Protocol.JoinRoom, "geheim", string.Empty);
         Assert.Equal("geheim", guest.Next(Protocol.Joined)[1]);
 
