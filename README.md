@@ -121,7 +121,7 @@ löschen.
 7. Nach deinem Lauf wartest du auf die anderen, danach kommt der gemeinsame Ergebnisbildschirm.
    Dort startet der Host per Revanche-Taste (Leertaste) die nächste Runde oder wählt eine andere Disziplin.
    Während du wartest, siehst du im Hintergrund dem besten Spieler zu, der noch spielt
-   (seine Szene läuft bei dir nach). Eine laufende Runde verlässt du über das Pausemenü des
+   (seine Szene läuft bei dir nach), darüber die Lobby mit Punkten und *Zur Lobby*. Eine laufende Runde verlässt du über das Pausemenü des
    Spiels (*Zum Start*). Wer pausiert, hält die anderen nur begrenzt auf: sind alle anderen
    fertig, zählt nach Ablauf der Frist (Standard 60 s) sein letzter Stand.
 
@@ -396,6 +396,11 @@ dotnet test tests/OGMultiplayer.Server.Tests
 Getestet mit der Spielversion auf Unity 6000.4.0f1 (Mono) und BepInEx 5.4.23.4 unter Linux.
 Ändert ein Spiel-Update die gepatchten Methoden, meldet das Plugin beim Start im
 BepInEx-Log, was fehlt.
+
+## Sicherheit
+
+Sicherheitslücken bitte privat melden, nicht als öffentliches Issue – siehe [SECURITY.md](SECURITY.md).
+Dort steht auch, was das Protokoll schützt und was nicht (z. B. keine Transportverschlüsselung).
 
 ## Lizenz
 

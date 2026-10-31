@@ -34,6 +34,15 @@ namespace OGMultiplayer.Plugin
         private Text toast;
         private Font font;
 
+        // lobby overlay while watching another player (see MirrorView)
+        private RectTransform watchOverlay;
+        private Text watchTitle;
+        private Text watchSubtitle;
+        private readonly List<Text> watchRows = new List<Text>();
+        private Text watchLeave;
+        private float watchShownAt = -1f;
+        private bool watchArmed;
+
         private static OnlineSession Session => OnlineSession.Instance;
 
         /// <summary>Own round paused and only the pause menu open (not its settings or how-to pages).</summary>
@@ -62,6 +71,93 @@ namespace OGMultiplayer.Plugin
             banner = MakeText(go.transform, "Banner", 18, new Vector2(0f, 300f), new Vector2(880f, 56f));
             toastBackdrop = Backdrop(go.transform, new Vector2(0f, 236f), new Vector2(980f, 48f));
             toast = MakeText(go.transform, "Toast", 14, new Vector2(0f, 236f), new Vector2(960f, 48f));
+            BuildWatchOverlay(go.transform);
+        }
+
+        /// <summary>
+        /// Lobby panel in the style of the pause menu, over the upper half of the watched game:
+        /// who is done with how many points, who still plays, and the way back to the lobby.
+        /// </summary>
+        private void BuildWatchOverlay(Transform parent)
+        {
+            watchOverlay = new GameObject("WatchOverlay", typeof(RectTransform)).GetComponent<RectTransform>();
+            watchOverlay.SetParent(parent, false);
+            watchOverlay.anchoredPosition = new Vector2(0f, 150f);
+            watchOverlay.sizeDelta = new Vector2(700f, 300f);
+            Image backdrop = Backdrop(watchOverlay, Vector2.zero, Vector2.zero);
+            backdrop.color = new Color(PauseMenuTheme.BackdropColor.r, PauseMenuTheme.BackdropColor.g, PauseMenuTheme.BackdropColor.b, 0.6f);
+            backdrop.rectTransform.anchorMin = Vector2.zero;
+            backdrop.rectTransform.anchorMax = Vector2.one;
+            backdrop.rectTransform.offsetMin = Vector2.zero;
+            backdrop.rectTransform.offsetMax = Vector2.zero;
+            watchTitle = PauseMenuTheme.CreateText(watchOverlay, "Title", font, 30, new Vector2(0f, 112f), new Vector2(680f, 48f));
+            watchSubtitle = MakeText(watchOverlay, "Subtitle", 14, new Vector2(0f, 76f), new Vector2(680f, 24f));
+            for (int i = 0; i < Protocol.MaxPlayers; i++)
+            {
+                Text row = MakeText(watchOverlay, "Player" + i, 17, new Vector2(0f, 38f - 30f * i), new Vector2(560f, 28f));
+                row.alignment = TextAnchor.MiddleLeft;
+                watchRows.Add(row);
+            }
+            watchLeave = PauseMenuTheme.CreateText(watchOverlay, "Leave", font, 22, new Vector2(0f, -112f), new Vector2(500f, 44f));
+            PauseMenuTheme.AddSelectionEffect(watchLeave);
+            PauseMenuTheme.ApplySelection(watchLeave, true);
+            watchOverlay.gameObject.SetActive(false);
+        }
+
+        private bool UpdateWatchOverlay()
+        {
+            MirrorView view = MirrorView.Instance;
+            bool show = Session.WaitingForResults && view != null && view.Showing && view.Watching != 0
+                && !PauseManager.IsAnyPaused && !OnlineMenu.Visible;
+            watchOverlay.gameObject.SetActive(show);
+            if (!show)
+            {
+                watchShownAt = -1f;
+                return false;
+            }
+            if (watchShownAt < 0f)
+            {
+                watchShownAt = Time.unscaledTime;
+                watchArmed = false;
+            }
+            LobbyPlayer watched = Session.Lobby.FirstOrDefault(p => p.Id == view.Watching);
+            PauseMenuTheme.SetLabel(watchTitle, "WARTE AUF DIE ANDEREN");
+            SetIfChanged(watchSubtitle, $"DU SIEHST {watched?.Initials ?? "?"} ZU");
+            List<LobbyPlayer> players = Session.Lobby
+                .OrderByDescending(p => p.Status == Protocol.StatusDone ? 1 : 0).ThenByDescending(p => p.Score).ToList();
+            for (int i = 0; i < watchRows.Count; i++)
+            {
+                bool used = i < players.Count;
+                watchRows[i].gameObject.SetActive(used);
+                if (used)
+                {
+                    LobbyPlayer p = players[i];
+                    string who = p.Initials + (p.Id == Session.MyId ? " (DU)" : p.IsBot ? " (BOT)" : string.Empty);
+                    SetIfChanged(watchRows[i], (p.Id == view.Watching ? "> " : "  ") + who.PadRight(10) + "  " + StatusText(p));
+                }
+            }
+            PauseMenuTheme.SetLabel(watchLeave, "ZUR LOBBY");
+            // only the game's own submit input; buttons still held from the round do not count
+            bool held = Input.GetButton("Submit") || ArcadeInput.JumpHeld() || Input.GetKey(KeyCode.KeypadEnter);
+            if (!watchArmed)
+            {
+                watchArmed = !held && Time.unscaledTime - watchShownAt > 1.5f;
+            }
+            else if (ArcadeInput.SubmitDown() || Input.GetKeyDown(KeyCode.KeypadEnter)
+                || (Input.GetMouseButtonDown(0) && RectTransformUtility.RectangleContainsScreenPoint(watchLeave.rectTransform, Input.mousePosition, null)))
+            {
+                watchArmed = false;
+                HotSeatFlowController.AbortToMenu();
+            }
+            return true;
+        }
+
+        private static void SetIfChanged(Text text, string value)
+        {
+            if (text.text != value)
+            {
+                text.text = value;
+            }
         }
 
         private Image Backdrop(Transform parent, Vector2 position, Vector2 size)
@@ -110,7 +206,8 @@ namespace OGMultiplayer.Plugin
             // the game's own results/setup pages already list everyone
             HotSeatFlowController hotSeat = HotSeatFlowController.Instance;
             bool hotSeatPage = hotSeat != null && (hotSeat.Phase == HotSeatPhase.Results || hotSeat.Phase == HotSeatPhase.Setup);
-            bool showPanel = Session.Connected && !menuOpen && !hotSeatPage;
+            bool watching = UpdateWatchOverlay();
+            bool showPanel = Session.Connected && !menuOpen && !hotSeatPage && !watching;
             panel.gameObject.SetActive(showPanel);
             if (showPanel)
             {
@@ -145,11 +242,9 @@ namespace OGMultiplayer.Plugin
             {
                 center = "WARTE AUF DIE ANDEREN SPIELER ...";
             }
-            else if (Session.WaitingForResults && MirrorView.Instance != null && MirrorView.Instance.Showing && MirrorView.Instance.Watching != 0)
+            else if (watching)
             {
-                LobbyPlayer watched = Session.Lobby.FirstOrDefault(p => p.Id == MirrorView.Instance.Watching);
-                center = $"DU SIEHST {watched?.Initials ?? "?"} ZU  (PAUSE > "
-                    + GameLocalization.GetOrDefault("ui.pause.backToStart", "ZUM START").ToUpperInvariant() + ": LOBBY)";
+                // the overlay says it all
             }
             else if (Session.WaitingForResults)
             {

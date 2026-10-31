@@ -258,7 +258,10 @@ Eingaben wird der **Szenenzustand** übertragen (`SceneMirror.cs`):
 - Der Zuschauer lädt die Szene neu, lässt ihre Skripte zwei Frames lang aufbauen und friert
   dann ein: Spiel-`MonoBehaviour`s (außer Pausemenü und UI-Bausteine) aus, Coroutinen
   gestoppt, Animatoren aus, Physik aus, Szenen-Audio stumm. Positionen gleiten den
-  gesendeten nach. Wechselt der Beobachtete, wird alles zurückgesetzt und per `VIEWKEY` ein
+  gesendeten nach. Darüber liegt ein Lobby-Overlay im Stil des Pausemenüs (`OnlineHud`):
+  wer fertig ist, wer noch spielt, wem man zusieht, und *Zur Lobby* (Bestätigen-Eingabe
+  des Spiels, erst nach 1,5 s und nachdem gehaltene Tasten losgelassen wurden – sonst
+  würde Tastendrücken vom Ende der eigenen Runde das Overlay sofort auslösen). Wechselt der Beobachtete, wird alles zurückgesetzt und per `VIEWKEY` ein
   vollständiger Stand angefordert.
 - Gestreamt wird nur, solange jemand zuschaut. Opt-out pro Spieler (`VIEWPREF`, Menüzeile
   *Zuschauen*) und pro Server (`--no-spectate`, Admin `spectate off`).
