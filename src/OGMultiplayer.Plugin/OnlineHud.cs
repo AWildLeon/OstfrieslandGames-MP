@@ -40,6 +40,7 @@ namespace OGMultiplayer.Plugin
         private Text watchSubtitle;
         private readonly List<Text> watchRows = new List<Text>();
         private Text watchLeave;
+        private Image watchArrow;
         private float watchShownAt = -1f;
         private bool watchArmed;
 
@@ -75,32 +76,38 @@ namespace OGMultiplayer.Plugin
         }
 
         /// <summary>
-        /// Lobby panel in the style of the pause menu, over the upper half of the watched game:
-        /// who is done with how many points, who still plays, and the way back to the lobby.
+        /// Lobby page built like the game's pause menu (same backdrop over the whole screen,
+        /// title, item font, selection effect and arrow): who is done with how many points,
+        /// who still plays, whom you watch, and the way back to the lobby.
         /// </summary>
         private void BuildWatchOverlay(Transform parent)
         {
             watchOverlay = new GameObject("WatchOverlay", typeof(RectTransform)).GetComponent<RectTransform>();
             watchOverlay.SetParent(parent, false);
-            watchOverlay.anchoredPosition = new Vector2(0f, 150f);
-            watchOverlay.sizeDelta = new Vector2(700f, 300f);
-            Image backdrop = Backdrop(watchOverlay, Vector2.zero, Vector2.zero);
-            backdrop.color = new Color(PauseMenuTheme.BackdropColor.r, PauseMenuTheme.BackdropColor.g, PauseMenuTheme.BackdropColor.b, 0.6f);
+            watchOverlay.anchorMin = Vector2.zero;
+            watchOverlay.anchorMax = Vector2.one;
+            watchOverlay.offsetMin = Vector2.zero;
+            watchOverlay.offsetMax = Vector2.zero;
+            var backdropGo = new GameObject("Backdrop", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            backdropGo.transform.SetParent(watchOverlay, false);
+            Image backdrop = backdropGo.GetComponent<Image>();
+            backdrop.sprite = WhitePixelSprite.Get();
+            backdrop.color = PauseMenuTheme.BackdropColor;
+            backdrop.raycastTarget = false;
             backdrop.rectTransform.anchorMin = Vector2.zero;
             backdrop.rectTransform.anchorMax = Vector2.one;
             backdrop.rectTransform.offsetMin = Vector2.zero;
             backdrop.rectTransform.offsetMax = Vector2.zero;
-            watchTitle = PauseMenuTheme.CreateText(watchOverlay, "Title", font, 30, new Vector2(0f, 112f), new Vector2(680f, 48f));
-            watchSubtitle = MakeText(watchOverlay, "Subtitle", 14, new Vector2(0f, 76f), new Vector2(680f, 24f));
+            watchTitle = PauseMenuTheme.CreateText(watchOverlay, "Title", font, PauseMenuTheme.TitleFontSize, PauseMenuTheme.TitlePosition, PauseMenuTheme.TitleSize);
+            watchSubtitle = PauseMenuTheme.CreateText(watchOverlay, "Subtitle", font, 16, new Vector2(0f, 92f), new Vector2(760f, 30f));
             for (int i = 0; i < Protocol.MaxPlayers; i++)
             {
-                Text row = MakeText(watchOverlay, "Player" + i, 17, new Vector2(0f, 38f - 30f * i), new Vector2(560f, 28f));
-                row.alignment = TextAnchor.MiddleLeft;
-                watchRows.Add(row);
+                watchRows.Add(PauseMenuTheme.CreateText(watchOverlay, "Player" + i, font, 18, new Vector2(0f, 44f - 34f * i), PauseMenuTheme.ItemSize));
             }
-            watchLeave = PauseMenuTheme.CreateText(watchOverlay, "Leave", font, 22, new Vector2(0f, -112f), new Vector2(500f, 44f));
+            watchLeave = PauseMenuTheme.CreateText(watchOverlay, "Leave", font, PauseMenuTheme.ItemFontSize, new Vector2(0f, PauseMenuTheme.ItemY(3)), PauseMenuTheme.ItemSize);
             PauseMenuTheme.AddSelectionEffect(watchLeave);
             PauseMenuTheme.ApplySelection(watchLeave, true);
+            watchArrow = MenuSelectionArrow.Create(watchOverlay);
             watchOverlay.gameObject.SetActive(false);
         }
 
@@ -122,7 +129,7 @@ namespace OGMultiplayer.Plugin
             }
             LobbyPlayer watched = Session.Lobby.FirstOrDefault(p => p.Id == view.Watching);
             PauseMenuTheme.SetLabel(watchTitle, "WARTE AUF DIE ANDEREN");
-            SetIfChanged(watchSubtitle, $"DU SIEHST {watched?.Initials ?? "?"} ZU");
+            PauseMenuTheme.SetLabel(watchSubtitle, $"DU SIEHST {watched?.Initials ?? "?"} ZU");
             List<LobbyPlayer> players = Session.Lobby
                 .OrderByDescending(p => p.Status == Protocol.StatusDone ? 1 : 0).ThenByDescending(p => p.Score).ToList();
             for (int i = 0; i < watchRows.Count; i++)
@@ -133,10 +140,11 @@ namespace OGMultiplayer.Plugin
                 {
                     LobbyPlayer p = players[i];
                     string who = p.Initials + (p.Id == Session.MyId ? " (DU)" : p.IsBot ? " (BOT)" : string.Empty);
-                    SetIfChanged(watchRows[i], (p.Id == view.Watching ? "> " : "  ") + who.PadRight(10) + "  " + StatusText(p));
+                    PauseMenuTheme.SetLabel(watchRows[i], who.PadRight(9) + " " + StatusText(p).PadRight(12));
                 }
             }
             PauseMenuTheme.SetLabel(watchLeave, "ZUR LOBBY");
+            MenuSelectionArrow.Place(watchArrow, watchLeave);
             // only the game's own submit input; buttons still held from the round do not count
             bool held = Input.GetButton("Submit") || ArcadeInput.JumpHeld() || Input.GetKey(KeyCode.KeypadEnter);
             if (!watchArmed)
@@ -150,14 +158,6 @@ namespace OGMultiplayer.Plugin
                 HotSeatFlowController.AbortToMenu();
             }
             return true;
-        }
-
-        private static void SetIfChanged(Text text, string value)
-        {
-            if (text.text != value)
-            {
-                text.text = value;
-            }
         }
 
         private Image Backdrop(Transform parent, Vector2 position, Vector2 size)

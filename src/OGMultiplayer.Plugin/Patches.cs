@@ -195,15 +195,24 @@ namespace OGMultiplayer.Plugin
     /// controller for the current player's figure. While watching, the scene is built with
     /// the watched player's figure instead.
     /// </summary>
-    [HarmonyPatch(typeof(HotSeatFlowController), nameof(HotSeatFlowController.ActiveCharacterId), MethodType.Getter)]
+    /// (Both getters are patched: the small ActiveCharacterId getter may be inlined.)
+    [HarmonyPatch]
     internal static class ActiveCharacterPatch
     {
-        private static void Postfix(ref string __result)
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(HotSeatFlowController), nameof(HotSeatFlowController.ActiveCharacterId), MethodType.Getter)]
+        private static void ActiveCharacterId(ref string __result) => Override(ref __result);
+
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(SelectedCharacter), nameof(SelectedCharacter.Id), MethodType.Getter)]
+        private static void SelectedId(ref string __result) => Override(ref __result);
+
+        private static void Override(ref string result)
         {
             string watched = MirrorView.CharacterOverride;
             if (!string.IsNullOrEmpty(watched) && OnlineSession.OnlineControllerActive)
             {
-                __result = watched;
+                result = watched;
             }
         }
     }

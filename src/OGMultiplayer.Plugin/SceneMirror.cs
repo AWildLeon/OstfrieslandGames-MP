@@ -682,10 +682,10 @@ namespace OGMultiplayer.Plugin
                 {
                     loading = true;
                     loadedAt = Time.unscaledTime;
-                    CharacterOverride = WatchedCharacter(s);
                     matchId = s.MatchId;
+                    CharacterOverride = WatchedCharacter(s);
                     sceneName = Mirror.SceneFor(s.Discipline);
-                    Plugin.Log.LogInfo($"Zuschauen: lade {sceneName}");
+                    Plugin.Log.LogInfo($"Zuschauen: lade {sceneName} mit Figur {CharacterOverride}");
                     SceneManager.LoadScene(sceneName);
                 }
                 return;

@@ -258,7 +258,9 @@ Eingaben wird der **Szenenzustand** übertragen (`SceneMirror.cs`):
 - Der Zuschauer lädt die Szene neu, lässt ihre Skripte zwei Frames lang aufbauen und friert
   dann ein: Spiel-`MonoBehaviour`s (außer Pausemenü und UI-Bausteine) aus, Coroutinen
   gestoppt, Animatoren aus, Physik aus, Szenen-Audio stumm. Positionen gleiten den
-  gesendeten nach. Darüber liegt ein Lobby-Overlay im Stil des Pausemenüs (`OnlineHud`):
+  gesendeten nach. Darüber liegt eine Lobby-Seite, gebaut wie das Pausemenü des Spiels
+  (`PauseMenuTheme`: Abdunklung über den ganzen Bildschirm, Titel, Schrift, Auswahleffekt,
+  `MenuSelectionArrow`; in `OnlineHud`):
   wer fertig ist, wer noch spielt, wem man zusieht, und *Zur Lobby* (Bestätigen-Eingabe
   des Spiels, erst nach 1,5 s und nachdem gehaltene Tasten losgelassen wurden – sonst
   würde Tastendrücken vom Ende der eigenen Runde das Overlay sofort auslösen). Wechselt der Beobachtete, wird alles zurückgesetzt und per `VIEWKEY` ein
