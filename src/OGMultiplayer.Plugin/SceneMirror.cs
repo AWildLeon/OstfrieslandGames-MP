@@ -28,12 +28,8 @@ namespace OGMultiplayer.Plugin
     /// build at start exists on both sides), then freezes the game's own scripts, animators
     /// and physics and applies the stream, with smoothed positions.
     ///
-    /// Record format (one TAB field each): id;key=value;... with
-    ///   P path (first time / full state) K kind (s sprite, g image, x text, r rect, e empty)
-    ///   L sortingLayer,order  z fontSize  A anchorMin,anchorMax,pivot (1/1000)  a active  p x,y,z (1/100)  r rotZ (1/10 deg)
-    ///   s x,y (1/1000)  e enabled  i sprite (texture/sprite)  f flip bits  c rrggbbaa
-    ///   d w,h (1/100)  o ortho size (1/100)  F fill (1/1000)  t text  x removed
-    /// Names and texts are URI-escaped.
+    /// Units: positions and sizes 1/100, rotation 1/10 degree, scale and fill 1/1000.
+    /// The wire format is in MirrorWire.
     /// </summary>
     internal static class Mirror
     {
@@ -76,7 +72,10 @@ namespace OGMultiplayer.Plugin
                     }
                 }
             }
-            return promptRoots.Contains(t.GetInstanceID()) || t.GetComponent<IngameHudHint>() != null;
+            // the tea ceremony's order bubbles are marked as hints by the game, but they are
+            // part of the play (what each guest wants); its key legends are prompts
+            return promptRoots.Contains(t.GetInstanceID())
+                || (t.GetComponent<IngameHudHint>() != null && !t.name.StartsWith("Bubble", StringComparison.Ordinal));
         }
 
         /// <summary>Hides the watcher's own prompts (they are never streamed).</summary>
@@ -154,41 +153,210 @@ namespace OGMultiplayer.Plugin
             return v > int.MaxValue ? int.MaxValue : v < int.MinValue ? int.MinValue : (int)v;
         }
 
-        public static string Esc(string text) => Uri.EscapeDataString(text ?? string.Empty);
-
-        public static string Unesc(string text)
-        {
-            try
-            {
-                return Uri.UnescapeDataString(text ?? string.Empty);
-            }
-            catch (UriFormatException)
-            {
-                return string.Empty;
-            }
-        }
-
         public static uint Pack(Color32 c) => ((uint)c.r << 24) | ((uint)c.g << 16) | ((uint)c.b << 8) | c.a;
 
         public static Color32 Unpack(uint v) => new Color32((byte)(v >> 24), (byte)(v >> 16), (byte)(v >> 8), (byte)v);
+    }
 
-        public static string I(int v) => v.ToString(CultureInfo.InvariantCulture);
+    /// <summary>
+    /// Wire format of one VIEW payload (base64 in the line): a header byte (bit 0 = stream
+    /// reset: string table and object bindings start over, bit 1 = rest is deflated), then
+    /// records until the end. A record is: varint id, varint field mask (Mirror.F*), then the
+    /// fields in bit order. Numbers are zigzag varints of the difference to the value last
+    /// sent for that object (0 after (re)binding, so the first value is absolute). Strings
+    /// (paths, sprite keys, sorting layers) go through a string table: varint 2*index for a
+    /// known one, 2*index+1 followed by length + UTF-8 for a new one.
+    /// </summary>
+    internal static class MirrorWire
+    {
+        public const int FPath = 1 << 0;
+        public const int FSpawn = 1 << 1;
+        public const int FActive = 1 << 2;
+        public const int FActiveOn = 1 << 3;
+        public const int FPx = 1 << 4;
+        public const int FPy = 1 << 5;
+        public const int FPz = 1 << 6;
+        public const int FRot = 1 << 7;
+        public const int FSx = 1 << 8;
+        public const int FSy = 1 << 9;
+        public const int FEnabled = 1 << 10;
+        public const int FEnabledOn = 1 << 11;
+        public const int FSprite = 1 << 12;
+        public const int FFlip = 1 << 13;
+        public const int FColor = 1 << 14;
+        public const int FDx = 1 << 15;
+        public const int FDy = 1 << 16;
+        public const int FOrtho = 1 << 17;
+        public const int FFill = 1 << 18;
+        public const int FText = 1 << 19;
+        public const int FRemoved = 1 << 20;
 
-        public static bool TryInts(string text, int[] into)
+        public const byte HeaderReset = 1;
+        public const byte HeaderDeflate = 2;
+
+        /// <summary>Raw payload per line; base64 keeps the line below Protocol.MaxViewChars.</summary>
+        public const int MaxPayload = 8000;
+
+        private static bool deflateBroken;
+
+        /// <summary>Deflates when that is smaller (and the runtime has zlib); null otherwise.</summary>
+        public static byte[] TryDeflate(byte[] data, int offset, int count)
         {
-            string[] parts = text.Split(',');
-            if (parts.Length != into.Length)
+            if (deflateBroken || count < 64)
             {
-                return false;
+                return null;
             }
-            for (int i = 0; i < parts.Length; i++)
+            try
             {
-                if (!int.TryParse(parts[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out into[i]))
+                using (var ms = new System.IO.MemoryStream())
                 {
-                    return false;
+                    using (var z = new System.IO.Compression.DeflateStream(ms, System.IO.Compression.CompressionLevel.Fastest, true))
+                    {
+                        z.Write(data, offset, count);
+                    }
+                    return ms.Length < count ? ms.ToArray() : null;
                 }
             }
-            return true;
+            catch (Exception ex)
+            {
+                deflateBroken = true;
+                Plugin.Log.LogWarning("Zuschauer-Spiegel: Kompression nicht verfügbar: " + ex.Message);
+                return null;
+            }
+        }
+
+        public static byte[] Inflate(byte[] data, int offset)
+        {
+            using (var input = new System.IO.MemoryStream(data, offset, data.Length - offset))
+            using (var z = new System.IO.Compression.DeflateStream(input, System.IO.Compression.CompressionMode.Decompress))
+            using (var output = new System.IO.MemoryStream())
+            {
+                var buffer = new byte[4096];
+                int read;
+                while ((read = z.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    output.Write(buffer, 0, read);
+                    if (output.Length > 1 << 20)
+                    {
+                        throw new System.IO.InvalidDataException("zu groß");
+                    }
+                }
+                return output.ToArray();
+            }
+        }
+    }
+
+    /// <summary>Growable byte buffer with varints.</summary>
+    internal sealed class MirrorWriter
+    {
+        public byte[] Data = new byte[1024];
+        public int Length;
+
+        public void Clear() => Length = 0;
+
+        public void Byte(int b)
+        {
+            if (Length == Data.Length)
+            {
+                Array.Resize(ref Data, Data.Length * 2);
+            }
+            Data[Length++] = (byte)b;
+        }
+
+        public void UInt(uint v)
+        {
+            while (v >= 0x80)
+            {
+                Byte((int)(v & 0x7F) | 0x80);
+                v >>= 7;
+            }
+            Byte((int)v);
+        }
+
+        public void Int(int v) => UInt((uint)((v << 1) ^ (v >> 31)));
+
+        public void Raw32(uint v)
+        {
+            Byte((int)(v >> 24));
+            Byte((int)(v >> 16));
+            Byte((int)(v >> 8));
+            Byte((int)v);
+        }
+
+        public void Text(string s)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(s ?? string.Empty);
+            UInt((uint)bytes.Length);
+            foreach (byte b in bytes)
+            {
+                Byte(b);
+            }
+        }
+
+        public void Append(MirrorWriter other)
+        {
+            for (int i = 0; i < other.Length; i++)
+            {
+                Byte(other.Data[i]);
+            }
+        }
+    }
+
+    internal sealed class MirrorReader
+    {
+        private readonly byte[] data;
+        private int pos;
+
+        public MirrorReader(byte[] data, int pos)
+        {
+            this.data = data;
+            this.pos = pos;
+        }
+
+        public bool More => pos < data.Length;
+
+        public int Byte()
+        {
+            if (pos >= data.Length)
+            {
+                throw new System.IO.EndOfStreamException();
+            }
+            return data[pos++];
+        }
+
+        public uint UInt()
+        {
+            uint v = 0;
+            for (int shift = 0; shift < 35; shift += 7)
+            {
+                int b = Byte();
+                v |= (uint)(b & 0x7F) << shift;
+                if ((b & 0x80) == 0)
+                {
+                    return v;
+                }
+            }
+            throw new System.IO.InvalidDataException("varint");
+        }
+
+        public int Int()
+        {
+            uint v = UInt();
+            return (int)(v >> 1) ^ -(int)(v & 1);
+        }
+
+        public uint Raw32() => ((uint)Byte() << 24) | ((uint)Byte() << 16) | ((uint)Byte() << 8) | (uint)Byte();
+
+        public string Text()
+        {
+            int len = (int)UInt();
+            if (len < 0 || pos + len > data.Length)
+            {
+                throw new System.IO.EndOfStreamException();
+            }
+            string s = Encoding.UTF8.GetString(data, pos, len);
+            pos += len;
+            return s;
         }
     }
 
@@ -219,19 +387,31 @@ namespace OGMultiplayer.Plugin
             public RectTransform Rt;
             public Camera Cam;
             public bool Spawned;
-            public MirrorSnap Baseline;
             public MirrorSnap Sent;
             public bool HasSent;
             public bool PathSent;
             public bool Removed;
             public bool TransformRead;
+
+            /// <summary>Values the watcher last got (base of the differences), zero until bound.</summary>
+            public MirrorSnap Wire;
+
+            /// <summary>Out of view when last sent; then nothing more until it comes back.</summary>
+            public bool SentHidden;
+            public bool PendingHidden;
+
+            /// <summary>Mirrored parent; a new object goes out only after its new parent.</summary>
+            public Ent Parent;
         }
 
         private static MirrorSender instance;
         private readonly List<Ent> ents = new List<Ent>();
         private readonly Dictionary<int, Ent> byTransform = new Dictionary<int, Ent>();
-        private readonly StringBuilder line = new StringBuilder(Protocol.MaxViewChars + 512);
-        private readonly List<string> records = new List<string>();
+        private readonly MirrorWriter frameBuf = new MirrorWriter();
+        private readonly MirrorWriter rec = new MirrorWriter();
+        private readonly Dictionary<string, int> strings = new Dictionary<string, int>();
+        private readonly List<string> newStrings = new List<string>();
+        private bool resetPending;
         private Scene scene;
         private bool ready;
         private bool fullState;
@@ -313,11 +493,9 @@ namespace OGMultiplayer.Plugin
                 Cam = t.GetComponent<Camera>(),
                 Spawned = spawned,
             };
-            if (!spawned)
+            if (t.parent != null && byTransform.TryGetValue(t.parent.GetInstanceID(), out Ent parent))
             {
-                e.Baseline = Read(e, true);
-                e.Sent = e.Baseline;
-                e.HasSent = true;
+                e.Parent = parent;
             }
             ents.Add(e);
             byTransform[key] = e;
@@ -383,7 +561,7 @@ namespace OGMultiplayer.Plugin
             float now = Time.unscaledTime;
             if (now >= nextScan)
             {
-                nextScan = now + 1f;
+                nextScan = now + 0.3f;
                 Mirror.Walk(scene, (t, path) => Add(t, path, spawned: true));
             }
             if (now < nextSend)
@@ -393,13 +571,19 @@ namespace OGMultiplayer.Plugin
             nextSend = now + 0.1f;
             if (fullState)
             {
+                // watchers start over: new string table, every object bound again
                 fullState = false;
+                resetPending = true;
+                strings.Clear();
                 cursor = 0;
+                // everything once, also what looks unchanged: scenes pick some things at random
+                // when they start (decoration, texts), so the watcher's copy may differ there
                 foreach (Ent e in ents)
                 {
+                    e.Wire = default;
                     e.PathSent = false;
-                    e.HasSent = !e.Spawned;
-                    e.Sent = e.Baseline;
+                    e.HasSent = false;
+                    e.Sent = default;
                     if (e.T != null)
                     {
                         e.T.hasChanged = true;
@@ -412,32 +596,36 @@ namespace OGMultiplayer.Plugin
         /// <summary>One VIEW line per tick; what does not fit goes out with the next one.</summary>
         private void SendChanges(OnlineSession s)
         {
-            records.Clear();
-            int budget = Protocol.MaxViewChars;
+            frameBuf.Clear();
+            UpdateNearView();
             int count = ents.Count;
             int i = 0;
-            for (; i < count && budget > 0; i++)
+            for (; i < count; i++)
             {
                 int index = (cursor + i) % count;
                 Ent e = ents[index];
-                string record = Record(e);
-                if (record == null)
+                rec.Clear();
+                newStrings.Clear();
+                if (!Encode(e))
                 {
                     continue;
                 }
-                if (record.Length > Protocol.MaxViewChars)
+                if (rec.Length > MirrorWire.MaxPayload)
                 {
                     // never send a line the server would refuse (and drop the player for)
-                    Plugin.Log.LogWarning($"Zuschauer-Spiegel: Eintrag zu lang ({record.Length} Zeichen), übersprungen: {e.Path}");
+                    Plugin.Log.LogWarning($"Zuschauer-Spiegel: Eintrag zu groß ({rec.Length} Bytes), übersprungen: {e.Path}");
                     Commit(e);
                     continue;
                 }
-                if (record.Length > budget && records.Count > 0)
+                if (frameBuf.Length + rec.Length > MirrorWire.MaxPayload && frameBuf.Length > 0)
                 {
                     break;
                 }
-                budget -= record.Length + 1;
-                records.Add(record);
+                frameBuf.Append(rec);
+                foreach (string added in newStrings)
+                {
+                    strings[added] = strings.Count;
+                }
                 Commit(e);
             }
             cursor = count == 0 ? 0 : (cursor + i) % count;
@@ -449,16 +637,27 @@ namespace OGMultiplayer.Plugin
                     ents.RemoveAt(r);
                 }
             }
-            if (records.Count == 0)
+            if (frameBuf.Length == 0 && !resetPending)
             {
                 return;
             }
-            var fields = new string[records.Count + 3];
-            fields[0] = Protocol.View;
-            fields[1] = Protocol.Int(s.MatchId);
-            fields[2] = Protocol.Int(++frame);
-            records.CopyTo(fields, 3);
-            s.SendMirror(fields);
+            byte header = resetPending ? MirrorWire.HeaderReset : (byte)0;
+            resetPending = false;
+            byte[] packed = MirrorWire.TryDeflate(frameBuf.Data, 0, frameBuf.Length);
+            byte[] payload;
+            if (packed != null)
+            {
+                payload = new byte[packed.Length + 1];
+                Buffer.BlockCopy(packed, 0, payload, 1, packed.Length);
+                header |= MirrorWire.HeaderDeflate;
+            }
+            else
+            {
+                payload = new byte[frameBuf.Length + 1];
+                Buffer.BlockCopy(frameBuf.Data, 0, payload, 1, frameBuf.Length);
+            }
+            payload[0] = header;
+            s.SendMirror(Protocol.View, Protocol.Int(s.MatchId), Protocol.Int(++frame), Convert.ToBase64String(payload));
         }
 
         private MirrorSnap pending;
@@ -466,133 +665,283 @@ namespace OGMultiplayer.Plugin
         /// <summary>Longer texts are cut; nothing on screen needs more.</summary>
         private const int MaxText = 400;
 
-        private string Record(Ent e)
+        private bool viewKnown;
+        private Rect nearView;
+
+        /// <summary>Camera view plus margin, once per line.</summary>
+        private void UpdateNearView()
         {
-            line.Length = 0;
+            Camera cam = Camera.main;
+            viewKnown = cam != null && cam.orthographic;
+            if (viewKnown)
+            {
+                float h = cam.orthographicSize;
+                float w = h * cam.aspect;
+                Vector3 c = cam.transform.position;
+                nearView = new Rect(c.x - w * 1.5f, c.y - h * 1.5f, w * 3f, h * 3f);
+            }
+        }
+
+        private bool NearView(SpriteRenderer sr)
+        {
+            if (!viewKnown)
+            {
+                return sr.isVisible;
+            }
+            Bounds b = sr.bounds;
+            return b.max.x >= nearView.xMin && b.min.x <= nearView.xMax && b.max.y >= nearView.yMin && b.min.y <= nearView.yMax;
+        }
+
+        private void Str(string value)
+        {
+            value = value ?? string.Empty;
+            if (strings.TryGetValue(value, out int index))
+            {
+                rec.UInt((uint)index * 2);
+                return;
+            }
+            int pendingIndex = newStrings.IndexOf(value);
+            if (pendingIndex >= 0)
+            {
+                rec.UInt((uint)(strings.Count + pendingIndex) * 2);
+                return;
+            }
+            newStrings.Add(value);
+            rec.UInt(1);
+            rec.Text(value);
+        }
+
+        /// <summary>
+        /// Sprites far off screen wait until they come near: their state is sent then (the
+        /// watcher could not see them anyway). "Near" is the camera view plus half its size on
+        /// every side, so things driving in (cars) are there before they appear. The update
+        /// that takes something out of that area still goes out, so nothing stays behind.
+        /// </summary>
+        private bool OffScreen(Ent e)
+        {
+            bool hidden = e.Sr != null && e.T.childCount == 0 && e.Sr.enabled && e.T.gameObject.activeInHierarchy && !NearView(e.Sr);
+            bool skip = hidden && e.HasSent && e.PathSent && e.SentHidden;
+            e.PendingHidden = hidden;
+            return skip;
+        }
+
+        /// <summary>Writes the record for one object into rec; false = nothing to send.</summary>
+        private bool Encode(Ent e)
+        {
             if (e.T == null)
             {
                 if (e.Removed || (e.Spawned && !e.PathSent))
                 {
                     e.Removed = true;
-                    return null;
+                    return false;
                 }
-                line.Append(Mirror.I(e.Id));
+                rec.UInt((uint)e.Id);
+                rec.UInt((uint)(MirrorWire.FRemoved | (e.PathSent ? 0 : MirrorWire.FPath)));
                 if (!e.PathSent)
                 {
-                    line.Append(";P=").Append(Mirror.Esc(e.Path));
+                    Str(e.Path);
                 }
-                line.Append(";x");
                 pendingRemoved = true;
-                return line.ToString();
+                return true;
+            }
+            if (OffScreen(e))
+            {
+                return false;
+            }
+            if (!e.PathSent && e.Parent != null && e.Parent.Spawned && !e.Parent.PathSent && !e.Parent.Removed)
+            {
+                // the watcher has to create the parent first
+                return false;
             }
             bool transformToo = e.T.hasChanged || !e.HasSent;
             MirrorSnap now = Read(e, transformToo);
             MirrorSnap old = e.Sent;
+            MirrorSnap wire = e.PathSent ? e.Wire : default;
             bool all = !e.HasSent;
-            bool any = false;
-            line.Append(Mirror.I(e.Id));
+            bool component = e.Sr != null || e.Img != null || e.Txt != null;
+            int mask = 0;
             if (!e.PathSent)
             {
-                line.Append(";P=").Append(Mirror.Esc(e.Path));
+                mask |= MirrorWire.FPath;
                 if (e.Spawned)
                 {
-                    line.Append(";K=").Append(Kind(e));
-                    if (e.Sr != null)
-                    {
-                        line.Append(";L=").Append(Mirror.Esc(e.Sr.sortingLayerName)).Append(',').Append(Mirror.I(e.Sr.sortingOrder));
-                    }
-                    if (e.Txt != null)
-                    {
-                        line.Append(";z=").Append(Mirror.I(e.Txt.fontSize));
-                    }
-                    if (e.Rt != null)
-                    {
-                        line.Append(";A=").Append(Mirror.I(Mirror.Q(e.Rt.anchorMin.x, 1000f))).Append(',').Append(Mirror.I(Mirror.Q(e.Rt.anchorMin.y, 1000f)))
-                            .Append(',').Append(Mirror.I(Mirror.Q(e.Rt.anchorMax.x, 1000f))).Append(',').Append(Mirror.I(Mirror.Q(e.Rt.anchorMax.y, 1000f)))
-                            .Append(',').Append(Mirror.I(Mirror.Q(e.Rt.pivot.x, 1000f))).Append(',').Append(Mirror.I(Mirror.Q(e.Rt.pivot.y, 1000f)));
-                    }
-                    any = true;
+                    mask |= MirrorWire.FSpawn;
                 }
             }
             if (all || now.Active != old.Active)
             {
-                line.Append(";a=").Append(now.Active ? '1' : '0');
-                any = true;
+                mask |= MirrorWire.FActive | (now.Active ? MirrorWire.FActiveOn : 0);
             }
-            if (all || now.Px != old.Px || now.Py != old.Py || now.Pz != old.Pz)
+            if (all || now.Px != old.Px)
             {
-                line.Append(";p=").Append(Mirror.I(now.Px)).Append(',').Append(Mirror.I(now.Py)).Append(',').Append(Mirror.I(now.Pz));
-                any = true;
+                mask |= MirrorWire.FPx;
+            }
+            if (all || now.Py != old.Py)
+            {
+                mask |= MirrorWire.FPy;
+            }
+            if (all || now.Pz != old.Pz)
+            {
+                mask |= MirrorWire.FPz;
             }
             if (all || now.Rz != old.Rz)
             {
-                line.Append(";r=").Append(Mirror.I(now.Rz));
-                any = true;
+                mask |= MirrorWire.FRot;
             }
-            if (all || now.Sx != old.Sx || now.Sy != old.Sy)
+            if (all || now.Sx != old.Sx)
             {
-                line.Append(";s=").Append(Mirror.I(now.Sx)).Append(',').Append(Mirror.I(now.Sy));
-                any = true;
+                mask |= MirrorWire.FSx;
             }
-            bool component = e.Sr != null || e.Img != null || e.Txt != null;
+            if (all || now.Sy != old.Sy)
+            {
+                mask |= MirrorWire.FSy;
+            }
             if (component && (all || now.Enabled != old.Enabled))
             {
-                line.Append(";e=").Append(now.Enabled ? '1' : '0');
-                any = true;
+                mask |= MirrorWire.FEnabled | (now.Enabled ? MirrorWire.FEnabledOn : 0);
             }
             if ((e.Sr != null || e.Img != null) && (all || now.Sprite != old.Sprite))
             {
-                line.Append(";i=").Append(Mirror.Esc(Mirror.SpriteKey(now.Sprite)));
-                any = true;
+                mask |= MirrorWire.FSprite;
             }
             if (e.Sr != null && (all || now.Flip != old.Flip))
             {
-                line.Append(";f=").Append(Mirror.I(now.Flip));
-                any = true;
+                mask |= MirrorWire.FFlip;
             }
             if (component && (all || now.Color != old.Color))
             {
-                line.Append(";c=").Append(now.Color.ToString("x8", CultureInfo.InvariantCulture));
-                any = true;
+                mask |= MirrorWire.FColor;
             }
-            if (e.Rt != null && (all || now.Dx != old.Dx || now.Dy != old.Dy))
+            if (e.Rt != null && (all || now.Dx != old.Dx))
             {
-                line.Append(";d=").Append(Mirror.I(now.Dx)).Append(',').Append(Mirror.I(now.Dy));
-                any = true;
+                mask |= MirrorWire.FDx;
+            }
+            if (e.Rt != null && (all || now.Dy != old.Dy))
+            {
+                mask |= MirrorWire.FDy;
             }
             if (e.Cam != null && (all || now.Ortho != old.Ortho))
             {
-                line.Append(";o=").Append(Mirror.I(now.Ortho));
-                any = true;
+                mask |= MirrorWire.FOrtho;
             }
             if (e.Img != null && (all || now.Fill != old.Fill))
             {
-                line.Append(";F=").Append(Mirror.I(now.Fill));
-                any = true;
+                mask |= MirrorWire.FFill;
             }
             if (e.Txt != null && (all || !string.Equals(now.Text, old.Text, StringComparison.Ordinal)))
             {
-                string text = now.Text ?? string.Empty;
-                line.Append(";t=").Append(Mirror.Esc(text.Length > MaxText ? text.Substring(0, MaxText) : text));
-                any = true;
+                mask |= MirrorWire.FText;
             }
             pending = now;
             pendingRemoved = false;
             e.TransformRead = transformToo;
-            if (!any)
+            // the path alone (nothing differs from the loaded scene) needs no record
+            if ((mask & ~(MirrorWire.FPath | MirrorWire.FActiveOn | MirrorWire.FEnabledOn)) == 0
+                && (mask & MirrorWire.FSpawn) == 0)
             {
-                // nothing to send, but the state is known now
                 e.Sent = now;
+                e.SentHidden = e.PendingHidden;
                 if (transformToo)
                 {
                     e.T.hasChanged = false;
                 }
-                return null;
+                return false;
             }
-            return line.ToString();
+            rec.UInt((uint)e.Id);
+            rec.UInt((uint)mask);
+            if ((mask & MirrorWire.FPath) != 0)
+            {
+                Str(e.Path);
+            }
+            if ((mask & MirrorWire.FSpawn) != 0)
+            {
+                rec.Byte(Kind(e));
+                Str(e.Sr != null ? e.Sr.sortingLayerName : string.Empty);
+                rec.Int(e.Sr != null ? e.Sr.sortingOrder : 0);
+                rec.UInt((uint)(e.Txt != null ? e.Txt.fontSize : 0));
+                if (e.Rt != null)
+                {
+                    rec.Int(Mirror.Q(e.Rt.anchorMin.x, 1000f));
+                    rec.Int(Mirror.Q(e.Rt.anchorMin.y, 1000f));
+                    rec.Int(Mirror.Q(e.Rt.anchorMax.x, 1000f));
+                    rec.Int(Mirror.Q(e.Rt.anchorMax.y, 1000f));
+                    rec.Int(Mirror.Q(e.Rt.pivot.x, 1000f));
+                    rec.Int(Mirror.Q(e.Rt.pivot.y, 1000f));
+                }
+            }
+            if ((mask & MirrorWire.FPx) != 0)
+            {
+                rec.Int(now.Px - wire.Px);
+                wire.Px = now.Px;
+            }
+            if ((mask & MirrorWire.FPy) != 0)
+            {
+                rec.Int(now.Py - wire.Py);
+                wire.Py = now.Py;
+            }
+            if ((mask & MirrorWire.FPz) != 0)
+            {
+                rec.Int(now.Pz - wire.Pz);
+                wire.Pz = now.Pz;
+            }
+            if ((mask & MirrorWire.FRot) != 0)
+            {
+                rec.Int(now.Rz - wire.Rz);
+                wire.Rz = now.Rz;
+            }
+            if ((mask & MirrorWire.FSx) != 0)
+            {
+                rec.Int(now.Sx - wire.Sx);
+                wire.Sx = now.Sx;
+            }
+            if ((mask & MirrorWire.FSy) != 0)
+            {
+                rec.Int(now.Sy - wire.Sy);
+                wire.Sy = now.Sy;
+            }
+            if ((mask & MirrorWire.FSprite) != 0)
+            {
+                Str(Mirror.SpriteKey(now.Sprite));
+            }
+            if ((mask & MirrorWire.FFlip) != 0)
+            {
+                rec.Byte(now.Flip);
+            }
+            if ((mask & MirrorWire.FColor) != 0)
+            {
+                rec.Raw32(now.Color);
+            }
+            if ((mask & MirrorWire.FDx) != 0)
+            {
+                rec.Int(now.Dx - wire.Dx);
+                wire.Dx = now.Dx;
+            }
+            if ((mask & MirrorWire.FDy) != 0)
+            {
+                rec.Int(now.Dy - wire.Dy);
+                wire.Dy = now.Dy;
+            }
+            if ((mask & MirrorWire.FOrtho) != 0)
+            {
+                rec.Int(now.Ortho - wire.Ortho);
+                wire.Ortho = now.Ortho;
+            }
+            if ((mask & MirrorWire.FFill) != 0)
+            {
+                rec.Int(now.Fill - wire.Fill);
+                wire.Fill = now.Fill;
+            }
+            if ((mask & MirrorWire.FText) != 0)
+            {
+                string text = now.Text ?? string.Empty;
+                rec.Text(text.Length > MaxText ? text.Substring(0, MaxText) : text);
+            }
+            pendingWire = wire;
+            return true;
         }
 
         private bool pendingRemoved;
+        private MirrorSnap pendingWire;
 
         private void Commit(Ent e)
         {
@@ -603,14 +952,16 @@ namespace OGMultiplayer.Plugin
                 return;
             }
             e.Sent = pending;
+            e.Wire = pendingWire;
             e.HasSent = true;
+            e.SentHidden = e.PendingHidden;
             if (e.TransformRead)
             {
                 e.T.hasChanged = false;
             }
         }
 
-        private static char Kind(Ent e)
+        private static int Kind(Ent e)
         {
             if (e.Sr != null)
             {
@@ -646,6 +997,9 @@ namespace OGMultiplayer.Plugin
             public bool HasTarget;
             public Vector3 Target;
 
+            /// <summary>Last streamed values (differences add up on these).</summary>
+            public MirrorSnap Wire;
+
             // original state of scene objects, restored when the watched player changes
             public bool Saved;
             public bool Active;
@@ -670,8 +1024,42 @@ namespace OGMultiplayer.Plugin
 
         public int Watching { get; private set; }
 
-        /// <summary>The scene is (re)built with the watched player's character (see ActiveCharacterPatch).</summary>
-        public static string CharacterOverride { get; private set; }
+        /// <summary>Objects bound to the stream (for the game tests).</summary>
+        public int BoundCount => ents.Count;
+
+        /// <summary>Figure the scene was built with.</summary>
+        private string builtFigure;
+
+        // the hot seat player whose figure was swapped while the scene was built
+        private HotSeatPlayer swappedPlayer;
+        private string swappedFigure;
+
+        /// <summary>
+        /// Discipline scenes dress the player in the current hot seat player's figure while they
+        /// start. For the watcher that slot gets the watched player's figure just for that, and
+        /// its own figure back right after (results and the next round use it again).
+        /// </summary>
+        private void SwapFigure(string figure)
+        {
+            RestoreFigure();
+            HotSeatMatch match = HotSeatFlowController.Instance != null ? HotSeatFlowController.Instance.Match : null;
+            if (match == null || match.IsComplete || string.IsNullOrEmpty(figure))
+            {
+                return;
+            }
+            swappedPlayer = match.Players[match.CurrentPlayerIndex];
+            swappedFigure = swappedPlayer.CharacterId;
+            swappedPlayer.CharacterId = figure;
+        }
+
+        private void RestoreFigure()
+        {
+            if (swappedPlayer != null)
+            {
+                swappedPlayer.CharacterId = swappedFigure;
+                swappedPlayer = null;
+            }
+        }
 
         private readonly Dictionary<string, Transform> paths = new Dictionary<string, Transform>();
         private readonly Dictionary<int, Ent> ents = new Dictionary<int, Ent>();
@@ -685,12 +1073,13 @@ namespace OGMultiplayer.Plugin
         private float loadedAt = -100f;
         private bool ready;
         private float keyAt;
+        private readonly List<string> strings = new List<string>();
+        private bool synced;
+        private int lastFrame;
         private bool keyRetried;
         private bool viewSeen;
         private string sceneName;
         private int matchId;
-        private readonly int[] v3 = new int[3];
-        private readonly int[] v2 = new int[2];
 
         private static OnlineSession Session => OnlineSession.Instance;
 
@@ -721,8 +1110,7 @@ namespace OGMultiplayer.Plugin
             {
                 if (!ready)
                 {
-                    // round over before the scene was up: the next round uses the own figure again
-                    CharacterOverride = null;
+                    RestoreFigure();
                     loading = false;
                 }
                 if (ready && s != null && s.WaitingForResults && Watching != 0)
@@ -742,14 +1130,15 @@ namespace OGMultiplayer.Plugin
                     loading = true;
                     loadedAt = Time.unscaledTime;
                     matchId = s.MatchId;
-                    CharacterOverride = WatchedCharacter(s);
+                    builtFigure = WatchedCharacter(s);
+                    SwapFigure(builtFigure);
                     sceneName = Mirror.SceneFor(s.Discipline);
-                    Plugin.Log.LogInfo($"Zuschauen: lade {sceneName} mit Figur {CharacterOverride}");
+                    Plugin.Log.LogInfo($"Zuschauen: lade {sceneName} mit Figur {builtFigure}");
                     SceneManager.LoadScene(sceneName);
                 }
                 return;
             }
-            if (Watching != s.WatchTarget && WatchedCharacter(s) != CharacterOverride)
+            if (Watching != s.WatchTarget && WatchedCharacter(s) != builtFigure)
             {
                 // another figure: the scene has to be built again with it
                 Clear();
@@ -763,6 +1152,7 @@ namespace OGMultiplayer.Plugin
                 keyAt = 0f;
                 keyRetried = false;
                 viewSeen = false;
+                synced = false;
             }
             // one request per watched player; a single retry if nothing at all arrived (lost on the way)
             if (keyAt == 0f || (!viewSeen && !keyRetried && Time.unscaledTime - keyAt > 5f))
@@ -790,14 +1180,17 @@ namespace OGMultiplayer.Plugin
             yield return null;
             yield return null;
             freezing = false;
+            RestoreFigure();
             OnlineSession s = Session;
             if (!loaded.isLoaded || SceneManager.GetActiveScene() != loaded || s == null || s.MatchId != matchId)
             {
                 yield break;
             }
             scene = loaded;
+            CollectSceneSprites(scene);
             Freeze(scene);
             Mirror.HidePrompts(scene);
+            FindTrails(scene);
             paths.Clear();
             Mirror.Walk(scene, (t, path) => paths[path] = t);
             ready = true;
@@ -865,7 +1258,8 @@ namespace OGMultiplayer.Plugin
 
         private void Clear()
         {
-            CharacterOverride = null;
+            RestoreFigure();
+            builtFigure = null;
             ready = false;
             loading = false;
             freezing = false;
@@ -876,6 +1270,9 @@ namespace OGMultiplayer.Plugin
             paths.Clear();
             sprites = null;
             misses.Clear();
+            sceneSprites.Clear();
+            strings.Clear();
+            synced = false;
         }
 
         /// <summary>Puts the scene back the way it was loaded (another player is watched now).</summary>
@@ -938,76 +1335,119 @@ namespace OGMultiplayer.Plugin
             }
         }
 
-        /// <summary>VIEW playerId frame record*</summary>
+        /// <summary>VIEW playerId frame payload (see MirrorWire)</summary>
         public void Apply(string[] f)
         {
-            if (!Showing || f.Length < 4 || !Protocol.TryInt(f[1], out int from) || from != Watching || Watching == 0)
+            if (!Showing || f.Length < 4 || !Protocol.TryInt(f[1], out int from) || from != Watching || Watching == 0
+                || !Protocol.TryInt(f[2], out int frame))
             {
                 return;
             }
             viewSeen = true;
-            for (int i = 3; i < f.Length; i++)
+            byte[] payload;
+            try
             {
-                try
+                payload = Convert.FromBase64String(f[3]);
+            }
+            catch (FormatException)
+            {
+                return;
+            }
+            if (payload.Length == 0)
+            {
+                return;
+            }
+            bool reset = (payload[0] & MirrorWire.HeaderReset) != 0;
+            if (reset)
+            {
+                // everything starts over: back to the loaded scene, new string table
+                Revert();
+                strings.Clear();
+                synced = true;
+            }
+            else if (!synced || frame != lastFrame + 1)
+            {
+                // a gap: the differences no longer add up, ask for a full state once in a while
+                synced = false;
+                if (Time.unscaledTime - keyAt > 2f)
                 {
-                    ApplyRecord(f[i]);
+                    keyAt = Time.unscaledTime;
+                    Session?.SendMirror(Protocol.ViewKey, Protocol.Int(Session.MatchId));
                 }
-                catch (Exception ex)
+                lastFrame = frame;
+                return;
+            }
+            lastFrame = frame;
+            try
+            {
+                byte[] body = (payload[0] & MirrorWire.HeaderDeflate) != 0 ? MirrorWire.Inflate(payload, 1) : payload;
+                var r = new MirrorReader(body, body == payload ? 1 : 0);
+                while (r.More)
                 {
-                    Plugin.Log.LogDebug("Zuschauen: Eintrag übersprungen: " + ex.Message);
+                    ApplyRecord(r);
                 }
+            }
+            catch (Exception ex)
+            {
+                synced = false;
+                Plugin.Log.LogInfo("Zuschauen: Daten unlesbar, fordere vollständigen Stand an: " + ex.Message);
             }
         }
 
-        private void ApplyRecord(string record)
+        private string ReadStr(MirrorReader r)
         {
-            string[] parts = record.Split(';');
-            if (parts.Length < 2 || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int id))
+            uint v = r.UInt();
+            if ((v & 1) != 0)
             {
-                return;
+                string s = r.Text();
+                strings.Add(s);
+                return s;
             }
-            string path = null;
-            char kind = '\0';
-            string layer = null;
-            int fontSize = 0;
-            string anchors = null;
-            for (int i = 1; i < parts.Length; i++)
+            int index = (int)(v >> 1);
+            if (index >= strings.Count)
             {
-                string p = parts[i];
-                if (p.StartsWith("P=", StringComparison.Ordinal))
-                {
-                    path = Mirror.Unesc(p.Substring(2));
-                }
-                else if (p.StartsWith("K=", StringComparison.Ordinal) && p.Length > 2)
-                {
-                    kind = p[2];
-                }
-                else if (p.StartsWith("L=", StringComparison.Ordinal))
-                {
-                    layer = p.Substring(2);
-                }
-                else if (p.StartsWith("A=", StringComparison.Ordinal))
-                {
-                    anchors = p.Substring(2);
-                }
-                else if (p.StartsWith("z=", StringComparison.Ordinal))
-                {
-                    int.TryParse(p.Substring(2), NumberStyles.Integer, CultureInfo.InvariantCulture, out fontSize);
-                }
+                throw new System.IO.InvalidDataException("unbekannter Text");
             }
-            if (path != null)
+            return strings[index];
+        }
+
+        private void ApplyRecord(MirrorReader r)
+        {
+            int id = (int)r.UInt();
+            int mask = (int)r.UInt();
+            if ((mask & MirrorWire.FPath) != 0)
             {
-                Bind(id, path, kind, layer, fontSize, anchors);
+                string path = ReadStr(r);
+                char kind = '\0';
+                string layer = null;
+                int order = 0;
+                int fontSize = 0;
+                int[] anchors = null;
+                if ((mask & MirrorWire.FSpawn) != 0)
+                {
+                    kind = (char)r.Byte();
+                    layer = ReadStr(r);
+                    order = r.Int();
+                    fontSize = (int)r.UInt();
+                    if (kind == 'g' || kind == 'x' || kind == 'r')
+                    {
+                        anchors = new int[6];
+                        for (int i = 0; i < 6; i++)
+                        {
+                            anchors[i] = r.Int();
+                        }
+                    }
+                }
+                Bind(id, path, kind, layer, order, fontSize, anchors);
             }
-            if (!ents.TryGetValue(id, out Ent e) || e.T == null)
+            ents.TryGetValue(id, out Ent e);
+            if (e != null && e.T == null)
             {
-                return;
+                e = null;
             }
-            Save(e);
-            for (int i = 1; i < parts.Length; i++)
+            if ((mask & MirrorWire.FRemoved) != 0)
             {
-                string p = parts[i];
-                if (p == "x")
+                if (e != null)
                 {
                     if (e.Proxy)
                     {
@@ -1016,105 +1456,151 @@ namespace OGMultiplayer.Plugin
                     }
                     else
                     {
+                        Save(e);
                         e.T.gameObject.SetActive(false);
                     }
-                    return;
                 }
-                if (p.Length < 2 || p[1] != '=')
+                return;
+            }
+            // read every field, apply only to known objects
+            MirrorSnap w = e != null ? e.Wire : default;
+            bool moved = false;
+            if ((mask & MirrorWire.FPx) != 0)
+            {
+                w.Px += r.Int();
+                moved = true;
+            }
+            if ((mask & MirrorWire.FPy) != 0)
+            {
+                w.Py += r.Int();
+                moved = true;
+            }
+            if ((mask & MirrorWire.FPz) != 0)
+            {
+                w.Pz += r.Int();
+                moved = true;
+            }
+            bool rotated = (mask & MirrorWire.FRot) != 0;
+            if (rotated)
+            {
+                w.Rz += r.Int();
+            }
+            bool scaled = (mask & (MirrorWire.FSx | MirrorWire.FSy)) != 0;
+            if ((mask & MirrorWire.FSx) != 0)
+            {
+                w.Sx += r.Int();
+            }
+            if ((mask & MirrorWire.FSy) != 0)
+            {
+                w.Sy += r.Int();
+            }
+            string sprite = (mask & MirrorWire.FSprite) != 0 ? ReadStr(r) : null;
+            int flip = (mask & MirrorWire.FFlip) != 0 ? r.Byte() : -1;
+            uint color = (mask & MirrorWire.FColor) != 0 ? r.Raw32() : 0;
+            bool sized = (mask & (MirrorWire.FDx | MirrorWire.FDy)) != 0;
+            if ((mask & MirrorWire.FDx) != 0)
+            {
+                w.Dx += r.Int();
+            }
+            if ((mask & MirrorWire.FDy) != 0)
+            {
+                w.Dy += r.Int();
+            }
+            if ((mask & MirrorWire.FOrtho) != 0)
+            {
+                w.Ortho += r.Int();
+            }
+            if ((mask & MirrorWire.FFill) != 0)
+            {
+                w.Fill += r.Int();
+            }
+            string text = (mask & MirrorWire.FText) != 0 ? r.Text() : null;
+            if (e == null)
+            {
+                return;
+            }
+            e.Wire = w;
+            Save(e);
+            if ((mask & MirrorWire.FActive) != 0)
+            {
+                e.T.gameObject.SetActive((mask & MirrorWire.FActiveOn) != 0);
+            }
+            if (moved)
+            {
+                // fields not sent keep their streamed value (or the scene's, before the first one)
+                Vector3 current = e.HasTarget ? e.Target : e.T.localPosition;
+                var target = new Vector3(
+                    (mask & MirrorWire.FPx) != 0 ? w.Px / 100f : current.x,
+                    (mask & MirrorWire.FPy) != 0 ? w.Py / 100f : current.y,
+                    (mask & MirrorWire.FPz) != 0 ? w.Pz / 100f : current.z);
+                if (!e.HasTarget)
                 {
-                    continue;
+                    e.HasTarget = true;
+                    moving.Add(e);
+                    e.T.localPosition = target;
                 }
-                string value = p.Substring(2);
-                switch (p[0])
-                {
-                    case 'a':
-                        e.T.gameObject.SetActive(value == "1");
-                        break;
-                    case 'p':
-                        if (Mirror.TryInts(value, v3))
-                        {
-                            var target = new Vector3(v3[0] / 100f, v3[1] / 100f, v3[2] / 100f);
-                            if (!e.HasTarget)
-                            {
-                                e.HasTarget = true;
-                                moving.Add(e);
-                                e.T.localPosition = target;
-                            }
-                            e.Target = target;
-                        }
-                        break;
-                    case 'r':
-                        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int rz))
-                        {
-                            Vector3 euler = e.T.localEulerAngles;
-                            e.T.localEulerAngles = new Vector3(euler.x, euler.y, rz / 10f);
-                        }
-                        break;
-                    case 's':
-                        if (Mirror.TryInts(value, v2))
-                        {
-                            e.T.localScale = new Vector3(v2[0] / 1000f, v2[1] / 1000f, e.T.localScale.z);
-                        }
-                        break;
-                    case 'e':
-                        SetEnabled(e, value == "1");
-                        break;
-                    case 'i':
-                        SetSprite(e, LookupSprite(Mirror.Unesc(value)));
-                        break;
-                    case 'f':
-                        if (e.Sr != null && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int flip))
-                        {
-                            e.Sr.flipX = (flip & 1) != 0;
-                            e.Sr.flipY = (flip & 2) != 0;
-                        }
-                        break;
-                    case 'c':
-                        if (uint.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint col))
-                        {
-                            SetColor(e, Mirror.Unpack(col));
-                        }
-                        break;
-                    case 'd':
-                        if (e.Rt != null && Mirror.TryInts(value, v2))
-                        {
-                            e.Rt.sizeDelta = new Vector2(v2[0] / 100f, v2[1] / 100f);
-                        }
-                        break;
-                    case 'o':
-                        if (e.Cam != null && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int ortho))
-                        {
-                            e.Cam.orthographicSize = ortho / 100f;
-                        }
-                        break;
-                    case 'F':
-                        if (e.Img != null && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int fill))
-                        {
-                            e.Img.fillAmount = fill / 1000f;
-                        }
-                        break;
-                    case 't':
-                        if (e.Txt != null)
-                        {
-                            e.Txt.text = Mirror.Unesc(value);
-                        }
-                        break;
-                }
+                e.Target = target;
+            }
+            if (rotated)
+            {
+                Vector3 euler = e.T.localEulerAngles;
+                e.T.localEulerAngles = new Vector3(euler.x, euler.y, w.Rz / 10f);
+            }
+            if (scaled)
+            {
+                Vector3 sc = e.T.localScale;
+                e.T.localScale = new Vector3((mask & MirrorWire.FSx) != 0 ? w.Sx / 1000f : sc.x, (mask & MirrorWire.FSy) != 0 ? w.Sy / 1000f : sc.y, sc.z);
+            }
+            if ((mask & MirrorWire.FEnabled) != 0)
+            {
+                SetEnabled(e, (mask & MirrorWire.FEnabledOn) != 0);
+            }
+            if (sprite != null)
+            {
+                SetSprite(e, LookupSprite(sprite));
+            }
+            if (flip >= 0 && e.Sr != null)
+            {
+                e.Sr.flipX = (flip & 1) != 0;
+                e.Sr.flipY = (flip & 2) != 0;
+            }
+            if ((mask & MirrorWire.FColor) != 0)
+            {
+                SetColor(e, Mirror.Unpack(color));
+            }
+            if (sized && e.Rt != null)
+            {
+                Vector2 size = e.Rt.sizeDelta;
+                e.Rt.sizeDelta = new Vector2((mask & MirrorWire.FDx) != 0 ? w.Dx / 100f : size.x, (mask & MirrorWire.FDy) != 0 ? w.Dy / 100f : size.y);
+            }
+            if ((mask & MirrorWire.FOrtho) != 0 && e.Cam != null)
+            {
+                e.Cam.orthographicSize = w.Ortho / 100f;
+            }
+            if ((mask & MirrorWire.FFill) != 0 && e.Img != null)
+            {
+                e.Img.fillAmount = w.Fill / 1000f;
+            }
+            if (text != null && e.Txt != null)
+            {
+                e.Txt.text = text;
             }
         }
 
-        private void Bind(int id, string path, char kind, string layer, int fontSize, string anchors)
+        private void Bind(int id, string path, char kind, string layer, int order, int fontSize, int[] anchors)
         {
             if (!paths.TryGetValue(path, out Transform t) || t == null)
             {
-                t = CreateProxy(path, kind, layer, fontSize, anchors);
+                t = CreateProxy(path, kind, layer, order, fontSize, anchors);
                 if (t == null)
                 {
+                    ents.Remove(id);
                     return;
                 }
             }
             if (ents.TryGetValue(id, out Ent known) && known.T == t)
             {
+                known.Wire = default;
                 return;
             }
             var e = new Ent
@@ -1131,9 +1617,7 @@ namespace OGMultiplayer.Plugin
         }
 
         /// <summary>An object that only exists on the player's side (spawned during play).</summary>
-        private readonly int[] v6 = new int[6];
-
-        private Transform CreateProxy(string path, char kind, string layer, int fontSize, string anchors)
+        private Transform CreateProxy(string path, char kind, string layer, int order, int fontSize, int[] anchors)
         {
             int cut = path.LastIndexOf('/');
             if (cut < 0 || kind == '\0')
@@ -1158,16 +1642,17 @@ namespace OGMultiplayer.Plugin
             if (parent != null)
             {
                 go.transform.SetParent(parent, false);
+                go.layer = parent.gameObject.layer;
             }
             else
             {
                 SceneManager.MoveGameObjectToScene(go, scene);
             }
-            if (go.transform is RectTransform rt && anchors != null && Mirror.TryInts(anchors, v6))
+            if (go.transform is RectTransform rt && anchors != null)
             {
-                rt.anchorMin = new Vector2(v6[0] / 1000f, v6[1] / 1000f);
-                rt.anchorMax = new Vector2(v6[2] / 1000f, v6[3] / 1000f);
-                rt.pivot = new Vector2(v6[4] / 1000f, v6[5] / 1000f);
+                rt.anchorMin = new Vector2(anchors[0] / 1000f, anchors[1] / 1000f);
+                rt.anchorMax = new Vector2(anchors[2] / 1000f, anchors[3] / 1000f);
+                rt.pivot = new Vector2(anchors[4] / 1000f, anchors[5] / 1000f);
             }
             switch (kind)
             {
@@ -1175,13 +1660,9 @@ namespace OGMultiplayer.Plugin
                     SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
                     if (!string.IsNullOrEmpty(layer))
                     {
-                        string[] l = layer.Split(',');
-                        sr.sortingLayerName = Mirror.Unesc(l[0]);
-                        if (l.Length > 1 && int.TryParse(l[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int order))
-                        {
-                            sr.sortingOrder = order;
-                        }
+                        sr.sortingLayerName = layer;
                     }
+                    sr.sortingOrder = order;
                     break;
                 case 'g':
                     go.AddComponent<Image>().raycastTarget = false;
@@ -1288,6 +1769,67 @@ namespace OGMultiplayer.Plugin
 
         private readonly HashSet<string> misses = new HashSet<string>();
 
+        /// <summary>Sprites the frozen scene refers to (built with the watched player's figure).</summary>
+        private readonly HashSet<Sprite> sceneSprites = new HashSet<Sprite>();
+
+        private static readonly Dictionary<Type, System.Reflection.FieldInfo[]> spriteFields = new Dictionary<Type, System.Reflection.FieldInfo[]>();
+
+        /// <summary>Collects the sprites in the game scripts' fields (animation frames and the like).</summary>
+        private void CollectSceneSprites(Scene frozen)
+        {
+            sceneSprites.Clear();
+            foreach (GameObject root in frozen.GetRootGameObjects())
+            {
+                foreach (MonoBehaviour mb in root.GetComponentsInChildren<MonoBehaviour>(true))
+                {
+                    if (mb == null || mb.GetType().Assembly != Mirror.GameAssembly)
+                    {
+                        continue;
+                    }
+                    foreach (System.Reflection.FieldInfo field in SpriteFields(mb.GetType()))
+                    {
+                        object value = field.GetValue(mb);
+                        if (value is Sprite one)
+                        {
+                            sceneSprites.Add(one);
+                        }
+                        else if (value is IEnumerable<Sprite> many)
+                        {
+                            foreach (Sprite sprite in many)
+                            {
+                                if (sprite != null)
+                                {
+                                    sceneSprites.Add(sprite);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private static System.Reflection.FieldInfo[] SpriteFields(Type type)
+        {
+            if (!spriteFields.TryGetValue(type, out System.Reflection.FieldInfo[] fields))
+            {
+                var found = new List<System.Reflection.FieldInfo>();
+                for (Type t = type; t != null && t != typeof(MonoBehaviour); t = t.BaseType)
+                {
+                    foreach (System.Reflection.FieldInfo f in t.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public
+                        | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.DeclaredOnly))
+                    {
+                        if (f.FieldType == typeof(Sprite) || typeof(IEnumerable<Sprite>).IsAssignableFrom(f.FieldType))
+                        {
+                            found.Add(f);
+                        }
+                    }
+                }
+                fields = found.ToArray();
+                spriteFields[type] = fields;
+            }
+            return fields;
+        }
+
         private Sprite LookupSprite(string key)
         {
             if (string.IsNullOrEmpty(key))
@@ -1301,8 +1843,9 @@ namespace OGMultiplayer.Plugin
                 sprites = new Dictionary<string, Sprite>();
                 foreach (Sprite sprite in Resources.FindObjectsOfTypeAll<Sprite>())
                 {
+                    // figures share sprite and texture names; the scene's own sets win
                     string k = Mirror.SpriteKey(sprite);
-                    if (!sprites.ContainsKey(k))
+                    if (!sprites.TryGetValue(k, out Sprite known) || (!sceneSprites.Contains(known) && sceneSprites.Contains(sprite)))
                     {
                         sprites[k] = sprite;
                     }
@@ -1315,10 +1858,56 @@ namespace OGMultiplayer.Plugin
             return found;
         }
 
+        private static readonly System.Reflection.MethodInfo PixelTrailMethod =
+            HarmonyLib.AccessTools.Method(typeof(BosselnBallVisual), "UpdatePixelTrail");
+
+        private readonly List<BosselnBallVisual> trails = new List<BosselnBallVisual>();
+
+        /// <summary>
+        /// Trails are drawn from where the ball has been, so the watcher draws them itself from
+        /// the mirrored ball position (the rest of the ball script stays frozen).
+        /// </summary>
+        private void FindTrails(Scene frozen)
+        {
+            trails.Clear();
+            if (PixelTrailMethod == null)
+            {
+                return;
+            }
+            foreach (GameObject root in frozen.GetRootGameObjects())
+            {
+                trails.AddRange(root.GetComponentsInChildren<BosselnBallVisual>(true));
+            }
+        }
+
+        private void DrawTrails()
+        {
+            for (int i = trails.Count - 1; i >= 0; i--)
+            {
+                BosselnBallVisual ball = trails[i];
+                try
+                {
+                    if (ball == null)
+                    {
+                        trails.RemoveAt(i);
+                    }
+                    else if (ball.isActiveAndEnabled || ball.gameObject.activeInHierarchy)
+                    {
+                        PixelTrailMethod.Invoke(ball, null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogInfo("Zuschauen: Spur aus: " + (ex.InnerException ?? ex).Message);
+                    trails.RemoveAt(i);
+                }
+            }
+        }
+
         /// <summary>Positions glide towards the streamed ones (10 updates per second).</summary>
         private void LateUpdate()
         {
-            if (!Showing || moving.Count == 0)
+            if (!Showing)
             {
                 return;
             }
@@ -1335,6 +1924,7 @@ namespace OGMultiplayer.Plugin
                 float snap = e.Rt != null ? 300f : 4f;
                 e.T.localPosition = (current - e.Target).sqrMagnitude > snap * snap ? e.Target : Vector3.Lerp(current, e.Target, k);
             }
+            DrawTrails();
         }
     }
 }
