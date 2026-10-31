@@ -303,6 +303,65 @@ public class ServerTests
     }
 
     [Fact]
+    public async Task FinishedPlayersWatchTheBestPlayerStillPlaying()
+    {
+        await using var fx = new ServerFixture();
+        using var host = fx.Connect();
+        using var guest = fx.Connect();
+        using var third = fx.Connect();
+        host.Hello("HST");
+        guest.Hello("GST");
+        third.Hello("DRI");
+        host.Send(Protocol.Start, "2");
+        string matchId = host.Next(Protocol.Begin)[1];
+        foreach (TestClient c in new[] { host, guest, third })
+        {
+            c.Send(Protocol.Ready, matchId);
+        }
+        host.Next(Protocol.Go);
+        host.Send(Protocol.Live, matchId, "500");
+        third.Send(Protocol.Live, matchId, "100");
+        guest.Send(Protocol.Score, matchId, "300");
+
+        string[] watch = guest.Next(Protocol.Watch);
+        Assert.Equal(new[] { Protocol.Watch, matchId, Protocol.Int(host.Id) }, watch);
+        // nobody watches yet, so nobody streams; a non-target's VIEW is dropped
+        third.Send(Protocol.View, matchId, "1", "7;p=1,2,0");
+        guest.Send(Protocol.ViewKey, matchId);
+        Assert.Equal(new[] { Protocol.Stream, matchId, "1" }, host.Next(Protocol.Stream));
+        host.Send(Protocol.View, matchId, "1", "3;P=%2FCam%230;p=0,1,-10", "4;a=0");
+        Assert.Equal(new[] { Protocol.View, Protocol.Int(host.Id), "1", "3;P=%2FCam%230;p=0,1,-10", "4;a=0" }, guest.Next(Protocol.View));
+
+        // the target is done: the view moves on to the last one playing
+        host.Send(Protocol.Score, matchId, "900");
+        Assert.Equal(new[] { Protocol.Watch, matchId, Protocol.Int(third.Id) }, guest.Next(Protocol.Watch));
+        Assert.Equal(new[] { Protocol.Watch, matchId, Protocol.Int(third.Id) }, host.Next(Protocol.Watch));
+        host.Send(Protocol.ViewKey, matchId);
+        Assert.Equal(new[] { Protocol.Stream, matchId, "1" }, third.Next(Protocol.Stream));
+    }
+
+    [Fact]
+    public async Task PlayersCanOptOutOfBeingWatched()
+    {
+        await using var fx = new ServerFixture();
+        using var host = fx.Connect();
+        using var guest = fx.Connect();
+        host.Hello("HST");
+        guest.Hello("GST");
+        host.Send(Protocol.ViewPref, "0");
+        host.Send(Protocol.Start, "2");
+        string matchId = host.Next(Protocol.Begin)[1];
+        host.Send(Protocol.Ready, matchId);
+        guest.Send(Protocol.Ready, matchId);
+        host.Next(Protocol.Go);
+        guest.Send(Protocol.Score, matchId, "300");
+        host.Send(Protocol.Live, matchId, "400");
+        host.Send(Protocol.Score, matchId, "500");
+        // no WATCH before the result: there was nobody the guest may watch
+        Assert.Equal(Protocol.Result, guest.Next(Protocol.Watch, Protocol.Result)[0]);
+    }
+
+    [Fact]
     public async Task RoomIsLimitedToFourPlayers()
     {
         await using var fx = new ServerFixture();

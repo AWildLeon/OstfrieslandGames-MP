@@ -105,6 +105,9 @@ for (int i = 0; i < args.Length; i++)
             options.StateFile = next;
             i++;
             break;
+        case "--no-spectate":
+            options.Spectate = false;
+            break;
         case "--public":
             options.Public = true;
             break;
@@ -191,6 +194,7 @@ for (int i = 0; i < args.Length; i++)
                   -b, --bind <ip>            Bind-Adresse (Standard 0.0.0.0, Env OGMP_BIND)
                       --ready-timeout <s>    Max. Wartezeit auf alle Spieler vor dem Start (Standard 60)
                       --pause-grace <s>      So lange darf eine Pause die anderen aufhalten (Standard 60)
+                      --no-spectate          Fertige Spieler können den anderen nicht zuschauen
                       --match-timeout <min>  Max. Dauer einer Runde (Standard 20)
                       --password-file <pfad> Server-Passwort aus Datei (erste Zeile; Env OGMP_PASSWORD_FILE)
                                              Alternativ Env OGMP_PASSWORD. Ohne Passwort ist der Server offen.

@@ -68,6 +68,11 @@ namespace OGMultiplayer.Plugin
         private bool leftMatch;
         private bool pauseSent;
 
+        // watching: whom this client may watch (WATCH), and whether it streams its own scene (STREAM)
+        public int WatchTarget { get; private set; }
+        public bool StreamOn { get; private set; }
+        public float FinishedAt { get; private set; }
+
         // feedback
         public string Message { get; private set; }
         private float messageUntil;
@@ -446,6 +451,18 @@ namespace OGMultiplayer.Plugin
             MatchId = 0;
         }
 
+        /// <summary>Opt-out of being watched; sent after login and whenever the setting changes.</summary>
+        public void SendViewPreference()
+        {
+            if (Connected)
+            {
+                Send(Protocol.ViewPref, Plugin.AllowWatchers.Value ? "1" : "0");
+            }
+        }
+
+        /// <summary>For the scene mirror (VIEW / VIEWKEY lines).</summary>
+        internal void SendMirror(params string[] fields) => Send(fields);
+
         private void Send(params string[] fields)
         {
             net?.Send(Protocol.Encode(fields));
@@ -617,6 +634,7 @@ namespace OGMultiplayer.Plugin
                     Connecting = false;
                     LastError = null;
                     Plugin.Log.LogInfo($"Verbunden, Spieler-ID {id}");
+                    SendViewPreference();
                     break;
                 case Protocol.ServerInfo:
                     ServerName = f.ElementAtOrDefault(1) ?? ServerName;
@@ -680,6 +698,26 @@ namespace OGMultiplayer.Plugin
                 case Protocol.Result:
                     HandleResult(f);
                     break;
+                case Protocol.Watch:
+                    if (Protocol.TryInt(f.ElementAtOrDefault(1), out int watchMatch) && watchMatch == MatchId
+                        && Protocol.TryInt(f.ElementAtOrDefault(2), out int watchId))
+                    {
+                        WatchTarget = watchId;
+                    }
+                    break;
+                case Protocol.Stream:
+                    if (Protocol.TryInt(f.ElementAtOrDefault(1), out int streamMatch) && streamMatch == MatchId)
+                    {
+                        StreamOn = f.ElementAtOrDefault(2) == "1" && !LocalFinished;
+                        if (StreamOn)
+                        {
+                            MirrorSender.RequestFullState();
+                        }
+                    }
+                    break;
+                case Protocol.View:
+                    MirrorView.Instance?.Apply(f);
+                    break;
             }
         }
 
@@ -741,6 +779,8 @@ namespace OGMultiplayer.Plugin
             LocalFinished = false;
             leftMatch = false;
             pauseSent = false;
+            WatchTarget = 0;
+            StreamOn = false;
             lastLiveScore = -1;
 
             if (RunFlowController.IsActive)
@@ -807,6 +847,8 @@ namespace OGMultiplayer.Plugin
             }
             bool showInGame = OnlineControllerActive && !leftMatch && controller.Match != null && !controller.Match.IsComplete;
             MatchId = 0;
+            WatchTarget = 0;
+            StreamOn = false;
             if (!showInGame)
             {
                 string summary = string.Join(", ", Lobby.Select(p => $"{p.Initials} {(scores.TryGetValue(p.Id, out int s) ? s : 0)}"));
@@ -854,6 +896,8 @@ namespace OGMultiplayer.Plugin
                 return;
             }
             LocalFinished = true;
+            StreamOn = false;
+            FinishedAt = Time.unscaledTime;
             Send(Protocol.Score, Protocol.Int(MatchId), Protocol.Int(Math.Max(0, score)));
             Plugin.Log.LogInfo($"Eigene Runde beendet: {score} Punkte");
         }

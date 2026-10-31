@@ -191,6 +191,24 @@ namespace OGMultiplayer.Plugin
     }
 
     /// <summary>
+    /// Discipline scenes dress the player in SelectedCharacter.Id, which asks the hot seat
+    /// controller for the current player's figure. While watching, the scene is built with
+    /// the watched player's figure instead.
+    /// </summary>
+    [HarmonyPatch(typeof(HotSeatFlowController), nameof(HotSeatFlowController.ActiveCharacterId), MethodType.Getter)]
+    internal static class ActiveCharacterPatch
+    {
+        private static void Postfix(ref string __result)
+        {
+            string watched = MirrorView.CharacterOverride;
+            if (!string.IsNullOrEmpty(watched) && OnlineSession.OnlineControllerActive)
+            {
+                __result = watched;
+            }
+        }
+    }
+
+    /// <summary>
     /// The pause menu hides every other text on screen. Our HUD stays while only the pause menu
     /// is open in an online round, so a paused player sees how long the others still wait.
     /// </summary>

@@ -37,6 +37,9 @@ namespace OGMultiplayer
     ///   SCORE    matchId score              (turn finished)
     ///   LEAVE    matchId                    (aborted the running match)
     ///   PAUSE    matchId 0|1                (game paused / resumed during the own turn)
+    ///   VIEW     matchId frame record*      (scene mirror of the own turn, only while STREAM is on)
+    ///   VIEWKEY  matchId                    (watcher's scene is ready: please send everything)
+    ///   VIEWPREF 0|1                        (1 = others may watch me, the default; 0 = opt out)
     ///   CHAR     characterId                (change character while in lobby)
     ///   BOT      ADD | REMOVE | LEVEL n     (host only, while in lobby)
     ///   PING
@@ -59,6 +62,10 @@ namespace OGMultiplayer
     ///   RESULT   matchId score*             (score = id|points)
     ///   PONG
     ///   MSG      text                       (message from the server admin)
+    ///   STREAM   matchId 0|1                (1 = somebody watches you: mirror your scene, send
+    ///                                        a full state now; sent again for each new watcher)
+    ///   WATCH    matchId playerId           (whom you can watch while waiting, 0 = nobody)
+    ///   VIEW     playerId frame record*     (forwarded scene mirror, see SceneMirror)
     ///   BYE      reason                     (server closes the connection)
     /// </summary>
     public static class Protocol
@@ -68,8 +75,11 @@ namespace OGMultiplayer
         public const int MinPlayers = 2;
         public const int MaxPlayers = 4;
         public const int DisciplineCount = 5;
-        /// <summary>Longest line a client may send.</summary>
-        public const int MaxLineLength = 4096;
+        /// <summary>Longest line a client may send (scene mirror lines are the long ones).</summary>
+        public const int MaxLineLength = 16384;
+
+        /// <summary>Records per VIEW line stay below this, so a line never hits MaxLineLength.</summary>
+        public const int MaxViewChars = 12000;
 
         /// <summary>Longest line a server may send (legal texts).</summary>
         public const int MaxServerLineLength = 65536;
@@ -85,6 +95,11 @@ namespace OGMultiplayer
         public const string Score = "SCORE";
         public const string Leave = "LEAVE";
         public const string Pause = "PAUSE";
+        public const string View = "VIEW";
+        public const string ViewKey = "VIEWKEY";
+        public const string ViewPref = "VIEWPREF";
+        public const string Stream = "STREAM";
+        public const string Watch = "WATCH";
         public const string Char = "CHAR";
         public const string Ping = "PING";
         public const string Doc = "DOC";

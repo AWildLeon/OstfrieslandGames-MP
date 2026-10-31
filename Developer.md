@@ -69,6 +69,7 @@ src/OGMultiplayer.Plugin/           BepInEx-5-Plugin, netstandard2.1
   OnlineSetup.cs                    Figurenauswahl des Spiels für 1 Spieler nutzen
   OnlineMenu.cs                     Online-Seiten im Stil der Spielmenüs (uGUI)
   OnlineHud.cs                      Overlay: Spielerliste, Banner, Meldungen
+  SceneMirror.cs                    Zuschauen: Szenen-Spiegel (MirrorSender / MirrorView)
 src/OGMultiplayer.Server/           .NET-8-Server, keine Abhängigkeiten
   Server.cs                         Netzwerk, Räume, Runden, Auth, Bots
   Admin.cs                          Admin-Befehle (stdin), Shutdown
@@ -238,6 +239,33 @@ Wichtige Regeln:
 Spielerliste (Ecke konfigurierbar), Warte-Banner, Meldungen. Auf den Ergebnis-/Setup-Seiten
 des Spiels ist die Liste aus.
 
+### Zuschauen (Szenen-Spiegel)
+
+Wer fertig ist, sieht dem besten noch spielenden Menschen zu (Server wählt; Wechsel erst, wenn
+der Beobachtete fertig ist oder jemand 5 s lang 15 % vorne liegt). Statt Video oder
+Eingaben wird der **Szenenzustand** übertragen (`SceneMirror.cs`):
+
+- Beide Seiten laden dieselbe Disziplin-Szene. Objekte werden über ihren Hierarchiepfad
+  (`/Name#n/Kind#n`, `n` zählt gleichnamige Geschwister) zugeordnet; Pausemenü und seine
+  Seiten sind ausgenommen.
+- Der Spieler merkt sich zwei Frames nach dem Laden den Ausgangszustand und sendet bis zu 10×/s
+  nur Abweichungen: lokale Position/Rotation/Skalierung, aktiv, Sprite/Farbe/Flip/enabled von
+  `SpriteRenderer`/`Image`/`Text`, `sizeDelta`, Kamera-`orthographicSize`. Werte sind
+  quantisiert, damit „unverändert“ exakt gleich ist; Transform-Werte werden nur bei
+  `Transform.hasChanged` gelesen. Eine Zeile bleibt unter `MaxViewChars`, der Rest folgt im
+  nächsten Takt (Round-Robin). Während des Spiels erzeugte Objekte gehen mit Art und
+  Sortierung raus und werden beim Zuschauer als schlichte Stellvertreter angelegt.
+- Der Zuschauer lädt die Szene neu, lässt ihre Skripte zwei Frames lang aufbauen und friert
+  dann ein: Spiel-`MonoBehaviour`s (außer Pausemenü und UI-Bausteine) aus, Coroutinen
+  gestoppt, Animatoren aus, Physik aus, Szenen-Audio stumm. Positionen gleiten den
+  gesendeten nach. Wechselt der Beobachtete, wird alles zurückgesetzt und per `VIEWKEY` ein
+  vollständiger Stand angefordert.
+- Gestreamt wird nur, solange jemand zuschaut. Opt-out pro Spieler (`VIEWPREF`, Menüzeile
+  *Zuschauen*) und pro Server (`--no-spectate`, Admin `spectate off`).
+
+Grenzen: Partikel, `LineRenderer` und zur Laufzeit gezeichnete Texturen werden nicht
+übertragen; zufällig aufgebaute Szenen können an einzelnen Stellen abweichen.
+
 ### Score-API des Spiels
 
 `OnlineScoreSync` schickt alle HTTP-Anfragen über die Coroutine `Send(UnityWebRequest)`.
@@ -272,6 +300,11 @@ UTF-8-Zeile, Felder durch Tab getrennt, Unterfelder durch `|`. Version: **1**.
 | C→S | `READY matchId` | Client wartet am Rundenstart |
 | S→C | `GO matchId` | alle bereit (oder Ready-Timeout) |
 | C→S | `LIVE matchId score` | Live-Punkte (Padstock, Bosseln, Krabbenpulen) |
+| C→S | `VIEWPREF 0\|1` | Opt-out: 0 = niemand darf mir zuschauen (nach `WELCOME` und bei Änderung) |
+| S→C | `WATCH matchId playerId` | wem ich zuschauen kann (0 = niemandem); nur an Fertige/Nicht-Mitspieler |
+| C→S | `VIEWKEY matchId` | Zuschauer-Szene bereit, bitte vollständigen Stand |
+| S→C | `STREAM matchId 0\|1` | an den Beobachteten: Szene spiegeln (1, erneut = vollständiger Stand) |
+| C→S / S→C | `VIEW matchId frame record*` / `VIEW playerId frame record*` | Szenen-Spiegel, Server leitet nur an aktive Zuschauer weiter |
 | C→S | `PAUSE matchId 0\|1` | Pausemenü des Spiels geöffnet/geschlossen (eigene laufende Runde) |
 | C→S | `SCORE matchId score` / `LEAVE matchId` | Runde fertig / abgebrochen (0 Punkte) |
 | S→C | `RESULT matchId id\|score*` | alle fertig |

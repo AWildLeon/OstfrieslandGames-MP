@@ -145,6 +145,12 @@ namespace OGMultiplayer.Plugin
             {
                 center = "WARTE AUF DIE ANDEREN SPIELER ...";
             }
+            else if (Session.WaitingForResults && MirrorView.Instance != null && MirrorView.Instance.Showing && MirrorView.Instance.Watching != 0)
+            {
+                LobbyPlayer watched = Session.Lobby.FirstOrDefault(p => p.Id == MirrorView.Instance.Watching);
+                center = $"DU SIEHST {watched?.Initials ?? "?"} ZU  (PAUSE > "
+                    + GameLocalization.GetOrDefault("ui.pause.backToStart", "ZUM START").ToUpperInvariant() + ": LOBBY)";
+            }
             else if (Session.WaitingForResults)
             {
                 // the game's own pause menu leads out ("ZUM START" returns to the lobby here)

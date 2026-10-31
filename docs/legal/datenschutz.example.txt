@@ -9,7 +9,9 @@ Beim Verbinden mit diesem Server werden verarbeitet:
 - die von dir gewählten Initialen (drei Buchstaben) und deine Spielfigur,
 - Raumnamen; Server- und Raum-Passwörter nur als abgeleiteter Prüfwert
   (PBKDF2), der Betreiber sieht sie nie im Klartext,
-- Spielstände der laufenden Runde,
+- Spielstände der laufenden Runde und, solange dir jemand zuschaut, der
+  Zustand deiner Spielszene (Positionen und Bilder der Spielobjekte, kein
+  Bildschirm- oder Kamerabild); er wird nur weitergeleitet, nicht gespeichert,
 - der Zeitpunkt deiner Zustimmung zu diesen Hinweisen (im Server-Log).
 Es werden keine Konten angelegt und keine Spielstände dauerhaft gespeichert.
 
@@ -24,7 +26,9 @@ Verlassen bzw. Neustart gelöscht. Das Server-Log enthält gekürzte IP-Adressen
 gespeichert, bis sie aufgehoben werden.
 
 5. Empfänger
-Andere Spieler in deinem Raum sehen deine Initialen, Figur und Punkte. Der Server
+Andere Spieler in deinem Raum sehen deine Initialen, Figur und Punkte; wer vor
+dir fertig ist, sieht deinem Spiel zu. Das kannst du im Spiel abschalten
+(Online-Seite, Zeile „Zuschauen“). Der Server
 läuft bei [Hosting-Anbieter, Land]. Eine Weitergabe an Dritte findet nicht statt.
 
 6. Verschlüsselung

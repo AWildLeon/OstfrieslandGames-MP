@@ -120,6 +120,16 @@ löschen.
 6. Alle Spiele laden die Disziplin; gestartet wird erst, wenn alle bereit sind.
 7. Nach deinem Lauf wartest du auf die anderen, danach kommt der gemeinsame Ergebnisbildschirm.
    Dort startet der Host per Revanche-Taste (Leertaste) die nächste Runde oder wählt eine andere Disziplin.
+   Während du wartest, siehst du im Hintergrund dem besten Spieler zu, der noch spielt
+   (seine Szene läuft bei dir nach). Eine laufende Runde verlässt du über das Pausemenü des
+   Spiels (*Zum Start*). Wer pausiert, hält die anderen nur begrenzt auf: sind alle anderen
+   fertig, zählt nach Ablauf der Frist (Standard 60 s) sein letzter Stand.
+
+**Zuschauen ist abschaltbar** – auf der Online-Seite in der Zeile *Zuschauen*:
+*An* (zuschauen und zuschauen lassen), *Nur selbst zuschauen* (niemand sieht dein Spiel),
+*Nur andere dürfen*, *Aus*. In der Konfiguration: `[Spectate] WatchOthers` / `AllowWatchers`.
+Der Server-Betreiber kann es mit `--no-spectate` (NixOS: `spectate = false;`) oder zur Laufzeit
+mit dem Admin-Befehl `spectate off` ganz abschalten.
 
 Unten rechts siehst du während einer Runde alle Spieler mit Status und Punkten.
 
@@ -178,6 +188,7 @@ Konsole starten, Admin-Befehle dort eintippen) gibt es unter
 
 Optionen: `--port` (Standard 27420), `--bind` (Standard 0.0.0.0),
 `--ready-timeout <s>` (wie lange auf langsame Spieler gewartet wird, Standard 60),
+`--no-spectate` (Zuschauen abschalten),
 `--pause-grace <s>` (so lange darf eine Pause die anderen aufhalten, wenn alle anderen fertig
 sind; danach zählt der letzte Stand, Standard 60),
 `--match-timeout <min>` (maximale Rundendauer, Standard 20),
@@ -215,6 +226,7 @@ für seinen Besitzer zugänglich.
 | `endmatch <raum>` | laufende Runde beenden, Unfertige bekommen 0 |
 | `closeroom <raum> [grund]` | Raum schließen, Spieler zurück in die Raumliste |
 | `motd <text\|off>` | Nachricht in der Raumliste ändern |
+| `spectate <on\|off>` | Zuschauen fertiger Spieler erlauben/abschalten (bis zum Neustart) |
 | `legal reload` | Impressum/Datenschutz/Regeln neu einlesen (neue Datenschutz-Fassung = neue Zustimmung) |
 | `password <neu\|off\|reset>` | Passwort dauerhaft ändern/abschalten; `reset` = wieder das aus `--password-file` |
 | `shutdown [sekunden] [grund]` / `shutdown cancel` | Server beenden, optional mit Countdown im Spiel |
@@ -290,6 +302,7 @@ OGMultiplayer.Server --public --name "Moin-Server" --motd "Willkommen!" \
             imprintFile = "/etc/ogmultiplayer/impressum.txt";
             privacyFile = "/etc/ogmultiplayer/datenschutz.txt";
             rulesFile = "/etc/ogmultiplayer/regeln.txt";
+            # spectate = false;  # Zuschauen abschalten
           };
         }
       ];

@@ -26,6 +26,8 @@ namespace OGMultiplayer.Plugin
         internal static ConfigEntry<KeyCode> ToggleKey;
         internal static ConfigEntry<HudCorner> HudPosition;
         internal static ConfigEntry<bool> BlockScoreApi;
+        internal static ConfigEntry<bool> Spectate;
+        internal static ConfigEntry<bool> AllowWatchers;
 
         private Harmony harmony;
 
@@ -46,6 +48,9 @@ namespace OGMultiplayer.Plugin
                 // F8 is the game's pin editor key in the character select; never share keys with the game
                 ToggleKey.Value = KeyCode.F6;
             }
+            Spectate = Config.Bind("Spectate", "WatchOthers", true, "Wenn du fertig bist, siehst du im Hintergrund dem besten Spieler zu, der noch spielt.");
+            AllowWatchers = Config.Bind("Spectate", "AllowWatchers", true, "Andere duerfen dir zuschauen, wenn sie vor dir fertig sind (dein Spielbild geht dann ueber den Server an sie).");
+            AllowWatchers.SettingChanged += (_, __) => OnlineSession.Instance?.SendViewPreference();
             HudPosition = Config.Bind("UI", "HudPosition", HudCorner.BottomRight, "Ecke fuer die Spielerliste waehrend einer Online-Runde.");
 
             foreach (string missing in System.Linq.Enumerable.Concat(GameBridge.MissingMembers(), OnlineSetup.MissingMembers()))
@@ -62,6 +67,8 @@ namespace OGMultiplayer.Plugin
             host.AddComponent<OnlineSession>();
             host.AddComponent<OnlineMenu>();
             host.AddComponent<OnlineHud>();
+            host.AddComponent<MirrorSender>();
+            host.AddComponent<MirrorView>();
             Log.LogInfo("Inoffizieller Fan-Mod, keine Verbindung zu den Entwicklern von Ostfriesland Games. Fehler bitte nicht an deren Support melden.");
             Log.LogInfo($"{Name} {Version} geladen (Protokoll v{OGMultiplayer.Protocol.Version}). Hauptmenue > MEHRSPIELER oder {ToggleKey.Value} oeffnet den Online-Modus.");
         }

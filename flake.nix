@@ -151,6 +151,15 @@
               example = "Moin-Server";
               description = "Name in der Raumliste.";
             };
+            spectate = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = ''
+                Wer fertig ist, sieht dem besten Spieler zu, der noch spielt (Szenen-Spiegel
+                über den Server, nur solange jemand zuschaut). false = abgeschaltet.
+                Spieler können das zusätzlich im Spiel für sich abschalten.
+              '';
+            };
             motd = lib.mkOption {
               type = lib.types.nullOr lib.types.str;
               default = null;
@@ -215,6 +224,7 @@
                     "--state-file" "/var/lib/ogmultiplayer/state.json" "--no-console" ]
                   ++ lib.optionals (cfg.passwordFile != null) [ "--password-file" "%d/password" ]
                   ++ lib.optional cfg.public "--public"
+                  ++ lib.optional (!cfg.spectate) "--no-spectate"
                   ++ lib.optionals (cfg.serverName != null) [ "--name" cfg.serverName ]
                   ++ lib.optionals (cfg.motd != null) [ "--motd" cfg.motd ]
                   ++ lib.optionals (cfg.imprintFile != null) [ "--imprint-file" "%d/imprint" ]

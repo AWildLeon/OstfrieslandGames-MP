@@ -371,9 +371,45 @@ namespace OGMultiplayer.Plugin
             AddRow("Password", () => "PASSWORT: " + (editing == Field.Password ? Mask(editBuffer) + Cursor() : string.IsNullOrEmpty(password) ? "KEINS" : Mask(password)),
                 new Vector2(0f, y - step), () => BeginEdit(Field.Password), edit: Field.Password);
             AddPlayerRow(new Vector2(0f, y - 2 * step), OnlineSetup.Purpose.Online);
-            AddRow("Connect", () => Session.Connecting ? "VERBINDE ..." : "VERBINDEN", new Vector2(0f, y - 3 * step), Connect);
-            AddRow("Back", () => "ZURÜCK", new Vector2(0f, y - 4 * step), () => Show(Page.Choice, 1));
+            AddRow("Spectate", SpectateLabel, new Vector2(0f, y - 3 * step), CycleSpectate);
+            AddRow("Connect", () => Session.Connecting ? "VERBINDE ..." : "VERBINDEN", new Vector2(0f, y - 4 * step), Connect);
+            AddRow("Back", () => "ZURÜCK", new Vector2(0f, y - 5 * step), () => Show(Page.Choice, 1));
             PageFooter(string.Empty);
+        }
+
+        /// <summary>Opt-outs for the scene mirror: watching others / being watched.</summary>
+        private static string SpectateLabel()
+        {
+            bool watch = Plugin.Spectate.Value;
+            bool watched = Plugin.AllowWatchers.Value;
+            return "ZUSCHAUEN: " + (watch && watched ? "AN" : watch ? "NUR SELBST ZUSCHAUEN" : watched ? "NUR ANDERE DÜRFEN" : "AUS");
+        }
+
+        private static void CycleSpectate()
+        {
+            // AN -> NUR SELBST ZUSCHAUEN -> NUR ANDERE DÜRFEN -> AUS -> AN
+            bool watch = Plugin.Spectate.Value;
+            bool watched = Plugin.AllowWatchers.Value;
+            if (watch && watched)
+            {
+                watched = false;
+            }
+            else if (watch)
+            {
+                watch = false;
+                watched = true;
+            }
+            else if (watched)
+            {
+                watched = false;
+            }
+            else
+            {
+                watch = true;
+                watched = true;
+            }
+            Plugin.Spectate.Value = watch;
+            Plugin.AllowWatchers.Value = watched;
         }
 
         // ------------------------------------------------------------------ room browser

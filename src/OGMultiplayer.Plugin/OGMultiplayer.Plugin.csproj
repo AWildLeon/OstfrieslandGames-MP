@@ -38,6 +38,9 @@
     <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(GameManagedDir)/UnityEngine.TextRenderingModule.dll" Private="false" />
     <Reference Include="UnityEngine.UI" HintPath="$(GameManagedDir)/UnityEngine.UI.dll" Private="false" />
     <Reference Include="UnityEngine.UIModule" HintPath="$(GameManagedDir)/UnityEngine.UIModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AnimationModule" HintPath="$(GameManagedDir)/UnityEngine.AnimationModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AudioModule" HintPath="$(GameManagedDir)/UnityEngine.AudioModule.dll" Private="false" />
+    <Reference Include="UnityEngine.Physics2DModule" HintPath="$(GameManagedDir)/UnityEngine.Physics2DModule.dll" Private="false" />
   </ItemGroup>
 
   <Target Name="CheckGameDir" BeforeTargets="ResolveAssemblyReferences">

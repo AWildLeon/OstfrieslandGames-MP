@@ -30,6 +30,7 @@ public sealed partial class GameServer
         ("endmatch <raum>", "laufende Runde beenden (Unfertige = 0 Punkte)"),
         ("closeroom <raum> [grund]", "Raum schließen, Spieler zurück in die Raumliste"),
         ("motd <text|off>", "Nachricht in der Raumliste (bis zum Neustart)"),
+        ("spectate <on|off>", "Zuschauen fertiger Spieler erlauben/abschalten (bis zum Neustart)"),
         ("legal reload", "Impressum/Datenschutz/Regeln neu einlesen"),
         ("password <neu|off|reset>", "Passwort dauerhaft aendern/abschalten; reset = wieder aus der Konfiguration"),
         ("shutdown [sekunden] [grund]", "Server beenden, optional mit Countdown"),
@@ -105,6 +106,7 @@ public sealed partial class GameServer
                     "players" or "list" => PlayersText(),
                     "rooms" => RoomsText(),
                     "motd" => SetMotd(rest),
+                    "spectate" => SetSpectate(rest),
                     "legal" => ReloadLegal(rest),
                     "say" => Say(null, rest),
                     "sayroom" => SayRoom(rest),
@@ -149,6 +151,7 @@ public sealed partial class GameServer
             $"Rechtstexte:  {(documents.Count == 0 ? "keine" : DocumentList())}{(privacyHash.Length > 0 ? " (Datenschutz " + privacyHash + ")" : string.Empty)}",
             $"Raumlimit:    {(options.MaxRooms > 0 ? options.MaxRooms.ToString() : "keins")}, pro IP: {(options.MaxConnectionsPerIp > 0 ? options.MaxConnectionsPerIp.ToString() : "unbegrenzt")}",
             $"Passwort:     {(PasswordRequired ? "an" : "aus")}{(state.PasswordDisabled || state.PasswordKeyOverride != null ? " (per Admin geaendert)" : string.Empty)}",
+            $"Zuschauen:    {(options.Spectate ? "an" : "aus")}",
             $"Bans:         {bans.Count}",
             $"State-Datei:  {(string.IsNullOrEmpty(options.StateFile) ? "keine (nichts bleibt erhalten)" : options.StateFile)}",
             pendingShutdown != null ? "Shutdown:     geplant" : "Shutdown:     -");
@@ -403,6 +406,26 @@ public sealed partial class GameServer
             c.Send(info);
         }
         return options.Motd == null ? "MOTD entfernt." : "MOTD gesetzt.";
+    }
+
+    private string SetSpectate(string rest)
+    {
+        if (rest.Equals("on", StringComparison.OrdinalIgnoreCase))
+        {
+            options.Spectate = true;
+            foreach (Room room in rooms.Values)
+            {
+                UpdateSpectating(room);
+            }
+            return "Zuschauen erlaubt.";
+        }
+        if (rest.Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            options.Spectate = false;
+            StopSpectating();
+            return "Zuschauen abgeschaltet, laufende Übertragungen beendet.";
+        }
+        return "Aufruf: spectate <on|off> (zurzeit " + (options.Spectate ? "an" : "aus") + ")";
     }
 
     private string ReloadLegal(string rest)

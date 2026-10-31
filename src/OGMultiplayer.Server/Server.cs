@@ -24,6 +24,9 @@ public sealed class ServerOptions
     /// Only time spent paused counts; when it is used up, the last live score counts.
     /// </summary>
     public TimeSpan PauseGrace { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>Players who are done may watch the best player still playing (scene mirror).</summary>
+    public bool Spectate { get; set; } = true;
     public TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(30);
     public int MaxConnections { get; set; } = 256;
     public TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(15);
@@ -426,6 +429,13 @@ public sealed partial class GameServer
         }
         switch (cmd)
         {
+            case Protocol.ViewPref:
+                client.AllowWatchers = f.ElementAtOrDefault(1) != "0";
+                if (client.Room != null)
+                {
+                    UpdateSpectating(client.Room);
+                }
+                return;
             case Protocol.Rooms:
                 client.Send(RoomListLine());
                 return;
@@ -458,6 +468,12 @@ public sealed partial class GameServer
                 break;
             case Protocol.Pause:
                 HandlePause(client, room, f);
+                break;
+            case Protocol.View:
+                HandleView(client, room, f);
+                break;
+            case Protocol.ViewKey:
+                HandleViewKey(client, room, f);
                 break;
             case Protocol.Live:
                 HandleLive(client, room, f);
@@ -947,6 +963,141 @@ public sealed partial class GameServer
         BroadcastLobby(room);
     }
 
+    // ------------------------------------------------------------------ watching
+
+    /// <summary>
+    /// Picks whom the finished players watch: the human with the best live score among those
+    /// still playing. The pick is sticky so the view does not flip on every score change:
+    /// it moves when the target is done, or when someone else leads by 15% for 5 s.
+    /// Only the target streams, and only while somebody watches.
+    /// </summary>
+    private void UpdateSpectating(Room room)
+    {
+        Match? m = room.Match;
+        if (!options.Spectate || m == null || !m.GoSent)
+        {
+            return;
+        }
+        DateTime now = DateTime.UtcNow;
+        var candidates = m.Participants
+            .Where(p => !p.Client.IsBot && p.Client.AllowWatchers && (p.Status == Protocol.StatusPlaying || p.Status == Protocol.StatusPaused) && room.Members.Contains(p.Client))
+            .OrderByDescending(p => p.Score).ThenBy(p => p.Client.Id).ToList();
+        Participant? best = candidates.FirstOrDefault();
+        Participant? target = m.StreamTarget;
+        bool targetGone = target == null || !candidates.Contains(target);
+        if (targetGone)
+        {
+            target = best;
+        }
+        else if (best != null && best != target && best.Score > target!.Score * 1.15 + 10 && now - m.TargetSince > TimeSpan.FromSeconds(5))
+        {
+            target = best;
+        }
+        if (target != m.StreamTarget)
+        {
+            if (m.StreamTarget != null && m.StreamTarget.Client.StreamingMatch == m.Id)
+            {
+                m.StreamTarget.Client.StreamingMatch = 0;
+                m.StreamTarget.Client.Send(Protocol.Encode(Protocol.Stream, Protocol.Int(m.Id), "0"));
+            }
+            m.StreamTarget = target;
+            m.TargetSince = now;
+        }
+        int targetId = target?.Client.Id ?? 0;
+        foreach (Client member in room.Members.Where(c => !c.IsBot))
+        {
+            Participant? p = m.Find(member);
+            bool canWatch = p == null || p.Finished;
+            int watch = canWatch ? targetId : 0;
+            bool known = member.WatchMatch == m.Id;
+            if ((known && member.WatchTarget != watch) || (!known && watch != 0))
+            {
+                member.WatchMatch = m.Id;
+                member.WatchTarget = watch;
+                member.Watching = false;
+                member.Send(Protocol.Encode(Protocol.Watch, Protocol.Int(m.Id), Protocol.Int(watch)));
+            }
+        }
+        if (target != null)
+        {
+            bool watched = Watchers(room, m).Any();
+            int streaming = watched ? m.Id : 0;
+            if (target.Client.StreamingMatch != streaming)
+            {
+                target.Client.StreamingMatch = streaming;
+                target.Client.Send(Protocol.Encode(Protocol.Stream, Protocol.Int(m.Id), watched ? "1" : "0"));
+            }
+        }
+    }
+
+    /// <summary>Ends every stream and tells the watchers there is nobody to watch.</summary>
+    private void StopSpectating()
+    {
+        foreach (Room room in rooms.Values)
+        {
+            Match? m = room.Match;
+            if (m == null)
+            {
+                continue;
+            }
+            if (m.StreamTarget != null && m.StreamTarget.Client.StreamingMatch == m.Id)
+            {
+                m.StreamTarget.Client.StreamingMatch = 0;
+                m.StreamTarget.Client.Send(Protocol.Encode(Protocol.Stream, Protocol.Int(m.Id), "0"));
+            }
+            m.StreamTarget = null;
+            foreach (Client member in room.Members.Where(c => c.WatchMatch == m.Id && c.WatchTarget != 0))
+            {
+                member.WatchTarget = 0;
+                member.Watching = false;
+                member.Send(Protocol.Encode(Protocol.Watch, Protocol.Int(m.Id), "0"));
+            }
+        }
+    }
+
+    private static IEnumerable<Client> Watchers(Room room, Match m)
+    {
+        int targetId = m.StreamTarget?.Client.Id ?? 0;
+        return room.Members.Where(c => c.Watching && c.WatchMatch == m.Id && c.WatchTarget == targetId && targetId != 0);
+    }
+
+    private void HandleViewKey(Client client, Room room, string[] f)
+    {
+        Match? m = room.Match;
+        if (!options.Spectate || m == null || f.Length < 2 || !Protocol.TryInt(f[1], out int matchId) || matchId != m.Id
+            || client.WatchMatch != m.Id || client.WatchTarget == 0)
+        {
+            return;
+        }
+        client.Watching = true;
+        Participant? target = m.StreamTarget;
+        if (target == null || target.Client.Id != client.WatchTarget)
+        {
+            return;
+        }
+        // (re)start the stream with a full state for the new watcher
+        target.Client.StreamingMatch = m.Id;
+        target.Client.Send(Protocol.Encode(Protocol.Stream, Protocol.Int(m.Id), "1"));
+    }
+
+    private void HandleView(Client client, Room room, string[] f)
+    {
+        Match? m = room.Match;
+        if (m == null || m.StreamTarget?.Client != client || f.Length < 3 || !Protocol.TryInt(f[1], out int matchId) || matchId != m.Id)
+        {
+            return;
+        }
+        var fields = new string[f.Length];
+        fields[0] = Protocol.View;
+        fields[1] = Protocol.Int(client.Id);
+        Array.Copy(f, 2, fields, 2, f.Length - 2);
+        string line = Protocol.Encode(fields);
+        foreach (Client watcher in Watchers(room, m))
+        {
+            watcher.Send(line);
+        }
+    }
+
     private void HandlePause(Client client, Room room, string[] f)
     {
         Participant? p = ParticipantFor(client, room, f);
@@ -1219,6 +1370,7 @@ public sealed partial class GameServer
         {
             member.Send(line);
         }
+        UpdateSpectating(room);
         BroadcastRoomList();
     }
 
@@ -1282,6 +1434,15 @@ internal sealed class Client
     }
 
     public bool IsBot { get; }
+
+    // watching (scene mirror)
+    public int WatchMatch { get; set; }
+    public int WatchTarget { get; set; }
+    public bool Watching { get; set; }
+    public int StreamingMatch { get; set; }
+
+    /// <summary>Opt-out: false = this player is never streamed to others.</summary>
+    public bool AllowWatchers { get; set; } = true;
 
     public int BotLevel { get; set; }
 
@@ -1411,6 +1572,10 @@ internal sealed class Match
     public DateTime BeganAt { get; }
     public bool GoSent { get; set; }
     public List<Participant> Participants { get; } = new();
+
+    /// <summary>The player the others watch (scene mirror), null = nobody.</summary>
+    public Participant? StreamTarget { get; set; }
+    public DateTime TargetSince { get; set; }
 
     public Participant? Find(Client client) => Participants.FirstOrDefault(p => p.Client == client);
 }
