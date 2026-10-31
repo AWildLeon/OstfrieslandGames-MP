@@ -119,7 +119,7 @@ namespace OGMultiplayer.Plugin
             }
             else if (Session.WaitingForResults)
             {
-                center = "FERTIG! WARTE AUF DIE ANDEREN ...";
+                center = "FERTIG! WARTE AUF DIE ANDEREN ...  (ESC: ZUR LOBBY)";
             }
             SetBox(bannerBackdrop, banner, center);
             // over the menu the title area is taken, so messages go to the bottom there

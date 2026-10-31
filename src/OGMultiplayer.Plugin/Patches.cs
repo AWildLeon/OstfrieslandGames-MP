@@ -93,7 +93,20 @@ namespace OGMultiplayer.Plugin
             }
             if (__instance.Phase == HotSeatPhase.Results && __instance.Match != null)
             {
-                Session.RequestStart(__instance.Match.Discipline);
+                // Bosseln (and others) are played by hammering Space/A; the same presses must not
+                // start the next round the moment the results appear
+                if (!ResultsInputReady())
+                {
+                    return false;
+                }
+                if (Session.IsHost)
+                {
+                    Session.RequestStart(__instance.Match.Discipline);
+                }
+                else
+                {
+                    Session.Toast($"{Session.HostInitials()} startet die nächste Runde. Esc: zurück in die Lobby.", 5f);
+                }
             }
             return false;
         }
@@ -106,8 +119,19 @@ namespace OGMultiplayer.Plugin
             {
                 return true;
             }
-            Session.Toast($"Nur der Host ({Session.HostInitials()}) wählt die Disziplin.");
+            // guests: Back on the results page leaves to the lobby (from there "Raum verlassen")
+            HotSeatFlowController.AbortToMenu();
             return false;
+        }
+
+
+        private static bool ResultsInputReady()
+        {
+            if (Time.unscaledTime - GameBridge.ResultsShownAt < 2.5f)
+            {
+                return false;
+            }
+            return true;
         }
 
         // "Back" on the discipline page would open the local player setup: leave to the menu instead.

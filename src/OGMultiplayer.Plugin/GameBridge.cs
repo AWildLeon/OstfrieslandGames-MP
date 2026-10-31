@@ -169,8 +169,12 @@ namespace OGMultiplayer.Plugin
             return controller.Phase == HotSeatPhase.Handoff && (UnityEngine.Object)WaitingOwnerField.GetValue(controller) != null;
         }
 
+        /// <summary>When the online results page was opened (for the input grace period).</summary>
+        public static float ResultsShownAt { get; private set; } = -100f;
+
         public static void ShowResults(HotSeatFlowController controller)
         {
+            ResultsShownAt = Time.unscaledTime;
             controller.StopAllCoroutines();
             RefreshEligibilityMethod.Invoke(controller, null);
             PresentMenuMethod.Invoke(controller, new object[] { HotSeatPhase.Results });

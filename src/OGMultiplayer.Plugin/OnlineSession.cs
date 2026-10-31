@@ -538,6 +538,11 @@ namespace OGMultiplayer.Plugin
                 ReturnToLobby = Connected;
             }
             DriveMatch();
+            if (WaitingForResults && (Input.GetKeyDown(KeyCode.Escape) || ArcadeInput.BackDown()))
+            {
+                // own run is over: the finished game scene often ignores pause, so offer a way out
+                HotSeatFlowController.AbortToMenu();
+            }
             if (Message != null && Time.unscaledTime > messageUntil)
             {
                 Message = null;
