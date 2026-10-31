@@ -97,7 +97,7 @@ löschen.
 
 ## Spielen
 
-1. Spiel mit BepInEx starten, im Hauptmenü **Mehrspieler → Online** wählen (Abkürzung: **F8**).
+1. Spiel mit BepInEx starten, im Hauptmenü **Mehrspieler → Online** wählen (Abkürzung: **F6**).
    *An einem Gerät* ist der normale Hot-Seat-Modus des Spiels.
 2. Es öffnet sich die **Figurenauswahl des Spiels** (Ostfriesland-Karte, Initialen-Kästchen) –
    genau wie beim Mehrspieler an einem Gerät, nur für dich allein. Figur wählen, Initialen
@@ -148,7 +148,7 @@ Trag ihn per Pull Request in die Tabelle ein.
   lokalen Bestenliste der Disziplin.
 
 Einstellungen landen in `BepInEx/config/de.onlh.ostfriesland.multiplayer.cfg`
-(Server, Passwort, zuletzt erstellter Raum, Initialen, Figur, akzeptierte Datenschutz-Fassungen, F8-Abkürzung, Ecke für die Spielerliste,
+(Server, Passwort, zuletzt erstellter Raum, Initialen, Figur, akzeptierte Datenschutz-Fassungen, F6-Abkürzung, Ecke für die Spielerliste,
 `Privacy.BlockScoreApiWhileOnline`).
 
 ### Online-Bestenliste des Spiels

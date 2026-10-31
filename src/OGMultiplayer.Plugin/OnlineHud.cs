@@ -119,7 +119,9 @@ namespace OGMultiplayer.Plugin
             }
             else if (Session.WaitingForResults)
             {
-                center = "FERTIG! WARTE AUF DIE ANDEREN ...  (ESC: ZUR LOBBY)";
+                // the game's own pause menu leads out ("ZUM START" returns to the lobby here)
+                center = "FERTIG! WARTE AUF DIE ANDEREN ...  (PAUSE > "
+                    + GameLocalization.GetOrDefault("ui.pause.backToStart", "ZUM START").ToUpperInvariant() + ": ZUR LOBBY)";
             }
             SetBox(bannerBackdrop, banner, center);
             // over the menu the title area is taken, so messages go to the bottom there

@@ -227,7 +227,12 @@ Wichtige Regeln:
 - Lobby verlassen (`Raum verlassen`/Esc) führt online in die Raumliste, offline beendet es das Spiel gegen Bots; *Trennen* in der Raumliste beendet die Verbindung.
 - Nach `VERBINDEN` geht es automatisch in die Lobby; erneutes Drücken trennt nicht.
 - Endet eine Online-Runde (Ergebnis → Menü), öffnet sich die Lobby wieder
-  (`OnlineSession.ReturnToLobby`).
+  (`OnlineSession.ReturnToLobby`). Gäste verlassen das Ergebnis mit der Zurück-Taste des
+  Spiels, laufende Runden über das Pausemenü des Spiels („Zum Start“).
+- **Keine eigenen Tasten, die das Spiel schon belegt.** Der Mod nutzt nur die Menü-Eingaben
+  des Spiels (`ArcadeInput`, gleiche Bedeutung wie in den Spielmenüs) und F6 als Abkürzung
+  (F2/F8/F9/F10 sind Entwicklertasten des Spiels). Text wird nur getippt, während eine
+  Online-Seite offen ist und das Hauptmenü keine Eingaben bekommt.
 
 `OnlineHud` ist ein Overlay-Canvas (Sortierung 900) mit Spielschrift und Schatten:
 Spielerliste (Ecke konfigurierbar), Warte-Banner, Meldungen. Auf den Ergebnis-/Setup-Seiten

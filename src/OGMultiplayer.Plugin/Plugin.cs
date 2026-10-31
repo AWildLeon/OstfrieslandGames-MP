@@ -39,8 +39,13 @@ namespace OGMultiplayer.Plugin
             RoomName = Config.Bind("Server", "Room", "ostfriesland", "Raumname; alle Mitspieler muessen denselben Raum nutzen.");
             Initials = Config.Bind("Player", "Initials", "", "Deine drei Initialen (A-Z).");
             Character = Config.Bind("Player", "Character", "tim", "Figur-ID.");
-            ToggleKey = Config.Bind("UI", "ToggleKey", KeyCode.F8, "Abkuerzung im Hauptmenue: oeffnet direkt die Online-Seite.");
+            ToggleKey = Config.Bind("UI", "ToggleKey", KeyCode.F6, "Abkuerzung im Hauptmenue: oeffnet direkt die Online-Seite.");
             BlockScoreApi = Config.Bind("Privacy", "BlockScoreApiWhileOnline", true, "Keine Verbindungen zur Online-Bestenliste des Spiels, solange der Online-Modus verbunden ist. Online-Runden landen nie in der weltweiten Bestenliste.");
+            if (ToggleKey.Value == KeyCode.F8)
+            {
+                // F8 is the game's pin editor key in the character select; never share keys with the game
+                ToggleKey.Value = KeyCode.F6;
+            }
             HudPosition = Config.Bind("UI", "HudPosition", HudCorner.BottomRight, "Ecke fuer die Spielerliste waehrend einer Online-Runde.");
 
             foreach (string missing in System.Linq.Enumerable.Concat(GameBridge.MissingMembers(), OnlineSetup.MissingMembers()))
