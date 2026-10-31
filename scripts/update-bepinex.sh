@@ -46,4 +46,14 @@ sed -i \
   flake.nix
 sed -i "s/BepInEx [0-9][0-9.]* (gepinnt/BepInEx ${latest} (gepinnt/" README.md
 
+# Windows build for scripts/install.ps1
+win_url="https://github.com/BepInEx/BepInEx/releases/download/v${latest}/BepInEx_win_x64_${latest}.zip"
+curl -fsSL -o "$tmp/bepinex_win.zip" "$win_url"
+unzip -l "$tmp/bepinex_win.zip" | grep -q "winhttp.dll"
+win_hex="$(sha256sum "$tmp/bepinex_win.zip" | cut -d' ' -f1)"
+sed -i \
+  -e "s/^\$BepInExVersion = '.*'/\$BepInExVersion = '${latest}'/" \
+  -e "s/^\$BepInExSha256 = '.*'/\$BepInExSha256 = '${win_hex}'/" \
+  scripts/install.ps1
+
 echo "$latest"

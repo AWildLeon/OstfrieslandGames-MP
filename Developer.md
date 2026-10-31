@@ -75,7 +75,8 @@ src/OGMultiplayer.Server/           .NET-8-Server, keine Abhängigkeiten
   State.cs                          State-Datei (Bans, Passwort-Override)
   Program.cs                        CLI-Optionen, Signale
 tests/OGMultiplayer.Server.Tests/   xUnit-Tests gegen echten Server auf Port 0
-scripts/install.sh                  BepInEx installieren + Plugin bauen
+scripts/install.sh                  BepInEx installieren + Plugin bauen (Linux/macOS-Shell)
+scripts/install.ps1, install.cmd    dasselbe für Windows (PowerShell 5.1+, Doppelklick-Wrapper)
 scripts/update-bepinex.sh           BepInEx-Pin auf neueste 5.x-Version heben
 flake.nix                           Pakete, Apps (install/play/server), NixOS-Modul
 .github/                            CI, Wartung, Release, Dependabot
@@ -106,6 +107,10 @@ keine NuGet-Pakete. `GameDir` geht auch per Umgebungsvariable `OG_GAME_DIR`.
 `scripts/install.sh` erledigt BepInEx + Build + Kopie in `BepInEx/plugins/OGMultiplayer/`.
 
 Getestet mit der Linux-Version auf **Unity 6000.4.0f1 (Mono)** und **BepInEx 5.4.23.4**.
+Windows: Das Plugin ist plattformneutral (netstandard2.1, `BepInProcess` für `OG.x86_64` und
+`OG.exe`); BepInEx kommt dort als `winhttp.dll`-Doorstop. `install.ps1` wurde unter `pwsh`
+gegen eine nachgestellte Windows-Spielstruktur getestet, nicht auf einem echten Windows-System.
+Der Server wird in der CI zusätzlich auf `windows-latest` gebaut und getestet.
 Die Meldung `Unable to start Unity log writer` von BepInEx unter Unity 6 ist harmlos.
 
 ## Plugin
@@ -359,13 +364,13 @@ das Menüs per Reflection auslöst, Runden über `TryCompleteTurn` beendet, die 
 Deutsch stellt und Screenshots macht. Echte Tastendrücke kamen per `xdotool`. Die zweite
 Instanz war eine Hardlink-Kopie des Spielordners mit eigenem `BepInEx/`.
 
-Bekannte Lücken: kein Test mit echtem Controller, kein Test unter Windows.
+Bekannte Lücken: kein Test mit echtem Controller, kein Spieltest unter echtem Windows.
 
 ## Automatisierung
 
 | Workflow | Auslöser | Inhalt |
 | --- | --- | --- |
-| `ci.yml` | Push, PR | Server bauen + testen, `nix flake check`, Nix-Builds, shellcheck, actionlint; Dependabot-Automerge (Patch/Minor) nach grünem CI |
+| `ci.yml` | Push, PR | Server bauen + testen (Linux + Windows), PowerShell-Installer parsen, `nix flake check`, Nix-Builds, shellcheck, actionlint; Dependabot-Automerge (Patch/Minor) nach grünem CI |
 | `maintenance.yml` | montags, manuell | `nix flake update` + `scripts/update-bepinex.sh`, alles prüfen, PR erstellen und mergen |
 | `release.yml` | Tag `v*` | Tests, Server als Single-File für linux-x64/linux-arm64/win-x64, GitHub-Release |
 

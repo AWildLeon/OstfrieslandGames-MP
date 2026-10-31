@@ -12,8 +12,12 @@ permissions:
 
 jobs:
   test:
-    name: Server bauen + testen
-    runs-on: ubuntu-latest
+    name: Server bauen + testen (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -40,6 +44,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: shellcheck scripts/*.sh
+      - name: PowerShell-Installer parsen
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
       - uses: raven-actions/actionlint@v2
 
   # Dependabot-PRs (Patch/Minor) nach gruenem CI automatisch mergen.

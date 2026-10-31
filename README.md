@@ -38,7 +38,8 @@ Original-Ergebnisbildschirm des Spiels.
 
 ## Installation
 
-Du brauchst eine Linux-Version des Spiels (Ordner mit `OG.x86_64` und `OG_Data/`).
+Funktioniert mit der **Linux-** und der **Windows-Version** des Spiels (Ordner mit `OG.x86_64`
+bzw. `OG.exe` und `OG_Data/`). Online spielen Linux und Windows problemlos miteinander.
 
 ### NixOS / Nix
 
@@ -73,6 +74,26 @@ Ostfriesland-Games-Multiplayer/scripts/install.sh "/pfad/zu/Ostfriesland Games"
 ```bash
 cd "/pfad/zu/Ostfriesland Games" && ./run_bepinex.sh
 ```
+
+### Windows
+
+Benötigt: .NET SDK 8 (z. B. `winget install Microsoft.DotNet.SDK.8`) und das Repo
+(*Code → Download ZIP* oder `git clone`).
+
+1. Im Repo-Ordner `scripts\install.cmd` doppelklicken. Der Installer sucht das Spiel im
+   Steam-Standardordner, sonst fragt er nach dem Pfad (Ordner mit `OG.exe`). Alternativ:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\install.ps1 "C:\Program Files (x86)\Steam\steamapps\common\Ostfriesland Games"
+   ```
+
+2. Er lädt BepInEx 5 für Windows (Prüfsumme gepinnt) in den Spielordner, baut das Plugin gegen
+   deine Spielinstallation und kopiert es nach `BepInEx\plugins\OGMultiplayer\`.
+3. Spiel ganz normal starten (Steam oder `OG.exe`) – BepInEx wird über `winhttp.dll`
+   automatisch geladen, keine Startoptionen nötig.
+
+Deinstallieren: im Spielordner `winhttp.dll`, `doorstop_config.ini` und den Ordner `BepInEx`
+löschen.
 
 ## Spielen
 
@@ -139,7 +160,8 @@ oder ohne Nix:
 dotnet run -c Release --project src/OGMultiplayer.Server -- --port 27420
 ```
 
-Fertige Server-Binaries (Linux x64/arm64, Windows) gibt es unter
+Fertige Server-Binaries (Linux x64/arm64, **Windows x64**: `OGMultiplayer.Server.exe` aus der
+Konsole starten, Admin-Befehle dort eintippen) gibt es unter
 [Releases](https://github.com/AWildLeon/Ostfriesland-Games-Multiplayer/releases).
 
 Optionen: `--port` (Standard 27420), `--bind` (Standard 0.0.0.0),

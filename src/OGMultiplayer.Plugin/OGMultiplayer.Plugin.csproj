@@ -41,8 +41,8 @@
   </ItemGroup>
 
   <Target Name="CheckGameDir" BeforeTargets="ResolveAssemblyReferences">
-    <Error Condition="!Exists('$(GameManagedDir)/Assembly-CSharp.dll')" Text="Spiel nicht gefunden. Bitte -p:GameDir=&quot;/pfad/zu/Ostfriesland Games&quot; oder OG_GAME_DIR setzen (Ordner mit OG.x86_64)." />
-    <Error Condition="!Exists('$(BepInExCoreDir)/BepInEx.dll')" Text="BepInEx nicht gefunden ($(BepInExCoreDir)). Zuerst BepInEx 5 ins Spiel entpacken (scripts/install.sh erledigt das)." />
+    <Error Condition="!Exists('$(GameManagedDir)/Assembly-CSharp.dll')" Text="Spiel nicht gefunden. Bitte -p:GameDir=&quot;/pfad/zu/Ostfriesland Games&quot; oder OG_GAME_DIR setzen (Ordner mit OG.x86_64 bzw. OG.exe)." />
+    <Error Condition="!Exists('$(BepInExCoreDir)/BepInEx.dll')" Text="BepInEx nicht gefunden ($(BepInExCoreDir)). Zuerst BepInEx 5 ins Spiel entpacken (scripts/install.sh bzw. scripts/install.ps1 erledigt das)." />
   </Target>
 
 </Project>
