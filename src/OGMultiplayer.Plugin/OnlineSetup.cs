@@ -76,7 +76,7 @@ namespace OGMultiplayer.Plugin
             Finished = Purpose.None;
             Controller = GameBridge.CreateController();
             OnlineSession.RunAuthorized(Controller.EditPlayers);
-            Plugin.Log.LogInfo($"Figurenauswahl des Spiels fuer {purpose} geoeffnet");
+            Plugin.Log.LogInfo($"Figurenauswahl des Spiels für {purpose} geoeffnet");
         }
 
         /// <summary>Called right after the game built its registration screen.</summary>
@@ -105,7 +105,7 @@ namespace OGMultiplayer.Plugin
             Plugin.Initials.Value = player.Initials;
             Plugin.Character.Value = player.CharacterId;
             Finished = Current;
-            Plugin.Log.LogInfo($"Spieler gewaehlt: {player.Initials} ({player.CharacterId})");
+            Plugin.Log.LogInfo($"Spieler gewählt: {player.Initials} ({player.CharacterId})");
             Close();
         }
 

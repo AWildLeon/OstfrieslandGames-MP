@@ -331,7 +331,7 @@ namespace OGMultiplayer.Plugin
         {
             Header("MEHRSPIELER", "WIE WOLLT IHR SPIELEN?");
             float y = 120f;
-            AddRow("Local", () => "AN EINEM GERAET", new Vector2(0f, y), () =>
+            AddRow("Local", () => "AN EINEM GERÄT", new Vector2(0f, y), () =>
             {
                 Hide();
                 StartScreenMenuController menu = FindAnyObjectByType<StartScreenMenuController>();
@@ -342,7 +342,7 @@ namespace OGMultiplayer.Plugin
             });
             AddRow("Online", () => "ONLINE", new Vector2(0f, y - 76f), OpenOnline);
             AddRow("Bots", () => "GEGEN BOTS", new Vector2(0f, y - 152f), StartBots);
-            AddRow("Back", () => "ZURUECK", new Vector2(0f, y - 228f), Hide);
+            AddRow("Back", () => "ZURÜCK", new Vector2(0f, y - 228f), Hide);
             PageFooter("ONLINE UND GEGEN BOTS: INOFFIZIELLER FAN-MOD, NICHT VON DEN ENTWICKLERN DES SPIELS.");
         }
 
@@ -357,7 +357,7 @@ namespace OGMultiplayer.Plugin
             AddRow("Room", () => "RAUM: " + Shown(Field.Room, room).ToUpperInvariant(), new Vector2(0f, y - 2 * step), () => BeginEdit(Field.Room), edit: Field.Room);
             AddPlayerRow(new Vector2(0f, y - 3 * step), OnlineSetup.Purpose.Online);
             AddRow("Connect", () => Session.Connecting ? "VERBINDE ..." : "VERBINDEN", new Vector2(0f, y - 4 * step), Connect);
-            AddRow("Back", () => "ZURUECK", new Vector2(0f, y - 5 * step), () => Show(Page.Choice, 1));
+            AddRow("Back", () => "ZURÜCK", new Vector2(0f, y - 5 * step), () => Show(Page.Choice, 1));
             PageFooter(string.Empty);
         }
 
@@ -414,7 +414,7 @@ namespace OGMultiplayer.Plugin
                         LobbyPlayer me = Session.Lobby.FirstOrDefault(p => p.Id == Session.MyId);
                         if (me != null && me.Initials != initials)
                         {
-                            Session.Toast("Neue Initialen gelten ab der naechsten Verbindung.", 5f);
+                            Session.Toast("Neue Initialen gelten ab der nächsten Verbindung.", 5f);
                         }
                         Show(Page.Lobby, 0);
                     }
@@ -453,7 +453,7 @@ namespace OGMultiplayer.Plugin
             {
                 AddRow("Discipline", () => DisciplineName(Disciplines[disciplineIndex]), new Vector2(0f, c - step * n++), StartMatch,
                     horizontal: d => disciplineIndex = (disciplineIndex + Disciplines.Length + d) % Disciplines.Length);
-                AddRow("Start", () => Session.Lobby.Count < Protocol.MinPlayers ? "RUNDE STARTEN (AB 2 SPIELERN)" : "RUNDE STARTEN", new Vector2(0f, c - step * n++), StartMatch);
+                AddRow("Start", () => Session.Lobby.Count < Protocol.MinPlayers ? "RUNDE STARTEN (AB 2)" : "RUNDE STARTEN", new Vector2(0f, c - step * n++), StartMatch);
                 AddRow("BotCount", () => "BOTS: " + Session.BotCount, new Vector2(0f, c - step * n++), Session.AddBot,
                     horizontal: d =>
                     {
@@ -466,7 +466,7 @@ namespace OGMultiplayer.Plugin
                             Session.RemoveBot();
                         }
                     });
-                AddRow("BotLevel", () => "BOT-STAERKE: " + Bots.LevelName(Session.BotLevel), new Vector2(0f, c - step * n++),
+                AddRow("BotLevel", () => "BOT-STÄRKE: " + Bots.LevelName(Session.BotLevel), new Vector2(0f, c - step * n++),
                     () => Session.SetBotLevel(Session.BotLevel % Bots.MaxLevel + 1),
                     horizontal: d => Session.SetBotLevel(Bots.ClampLevel(Session.BotLevel + d)));
             }
@@ -475,12 +475,7 @@ namespace OGMultiplayer.Plugin
                 AddPlayerRow(new Vector2(0f, c - step * n++), OnlineSetup.Purpose.ChangeInLobby);
             }
             bool offline = Session.IsOffline;
-            AddRow("Disconnect", () => offline ? "BEENDEN" : "TRENNEN", new Vector2(0f, c - step * n++), () =>
-            {
-                Session.Disconnect();
-                Show(offline ? Page.Choice : Page.Connect, offline ? 2 : 0);
-            });
-            AddRow("Back", () => "ZURUECK", new Vector2(0f, c - step * n++), Hide);
+            AddRow("Leave", () => offline ? "BEENDEN" : "RAUM VERLASSEN", new Vector2(0f, c - step * n++), LeaveLobby);
             PageFooter(string.Empty);
         }
 
@@ -514,7 +509,7 @@ namespace OGMultiplayer.Plugin
             SaveSettings();
             if (!int.TryParse(port, out int p) || p < 1 || p > 65535)
             {
-                Session.Toast("UNGUELTIGER PORT.");
+                Session.Toast("UNGÜLTIGER PORT.");
                 return;
             }
             Session.Connect(host, p, room, initials, characters.Count > 0 ? characters[characterIndex].id : SelectedCharacter.DefaultId, password);
@@ -587,9 +582,9 @@ namespace OGMultiplayer.Plugin
                 }
                 if (footer != null)
                 {
-                    footer.text = Session.RoomState == Protocol.StateMatch ? "EINE RUNDE LAEUFT GERADE."
-                        : Session.IsHost ? (Session.Lobby.Count < Protocol.MinPlayers ? "TIPP: MIT BOTS KANNST DU SOFORT LOSLEGEN." : "LINKS/RECHTS: WERT AENDERN")
-                        : $"{Session.HostInitials()} WAEHLT DIE DISZIPLIN.";
+                    footer.text = Session.RoomState == Protocol.StateMatch ? "EINE RUNDE LÄUFT GERADE."
+                        : Session.IsHost ? (Session.Lobby.Count < Protocol.MinPlayers ? "TIPP: MIT BOTS KANNST DU SOFORT LOSLEGEN." : "LINKS/RECHTS: WERT ÄNDERN")
+                        : $"{Session.HostInitials()} WÄHLT DIE DISZIPLIN.";
                 }
             }
             UpdateShowcase();
@@ -606,7 +601,7 @@ namespace OGMultiplayer.Plugin
             switch (p.Status)
             {
                 case Protocol.StatusLoading:
-                    status = "LAEDT";
+                    status = "LÄDT";
                     break;
                 case Protocol.StatusReady:
                     status = "BEREIT";
@@ -640,9 +635,12 @@ namespace OGMultiplayer.Plugin
 
         private void BuildShowcase()
         {
-            showcasePortrait = NewImage(pageRoot, "ShowcasePortrait", Color.white, Vector2.zero, new Vector2(200f, 250f));
-            showcasePortrait.preserveAspect = true;
-            AnchorRight(showcasePortrait.rectTransform, new Vector2(-150f, -205f));
+            // stands on the bottom edge of the screen, like the big portrait in the game's character select
+            showcasePortrait = NewImage(pageRoot, "ShowcasePortrait", Color.white, Vector2.zero, new Vector2(PortraitWidth, PortraitWidth));
+            RectTransform pr = showcasePortrait.rectTransform;
+            pr.anchorMin = pr.anchorMax = new Vector2(1f, 0f);
+            pr.pivot = new Vector2(0.5f, 0f);
+            pr.anchoredPosition = new Vector2(-PortraitWidth * 0.5f - 24f, 0f);
 
             EnsureBalloonSprites();
             Image balloon = NewImage(pageRoot, "QuoteBubble", Color.white, Vector2.zero, new Vector2(340f, 80f));
@@ -650,9 +648,9 @@ namespace OGMultiplayer.Plugin
             balloon.type = Image.Type.Sliced;
             balloon.pixelsPerUnitMultiplier = 1f / GamePixel;
             bubble = balloon.rectTransform;
-            bubble.anchorMin = bubble.anchorMax = new Vector2(1f, 0.5f);
+            bubble.anchorMin = bubble.anchorMax = new Vector2(1f, 0f);
             bubble.pivot = new Vector2(1f, 0f);
-            bubble.anchoredPosition = new Vector2(-40f, -60f);
+            bubble.anchoredPosition = new Vector2(-40f, PortraitWidth);
 
             Image tail = NewImage(bubble, "Tail", Color.white, Vector2.zero, new Vector2(9f, 7f) * GamePixel);
             tail.sprite = tailSprite;
@@ -681,12 +679,7 @@ namespace OGMultiplayer.Plugin
             bubble.gameObject.SetActive(false);
         }
 
-        private static void AnchorRight(RectTransform rect, Vector2 position)
-        {
-            rect.anchorMin = rect.anchorMax = new Vector2(1f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = position;
-        }
+        private const float PortraitWidth = 230f;
 
         private void UpdateShowcase()
         {
@@ -700,6 +693,13 @@ namespace OGMultiplayer.Plugin
             showcasePortrait.sprite = sprite;
             showcasePortrait.color = entry != null ? entry.tint : Color.white;
             showcasePortrait.enabled = sprite != null;
+            if (sprite != null)
+            {
+                // exact sprite proportions, so the bust really touches the bottom edge
+                float height = PortraitWidth * sprite.rect.height / Mathf.Max(1f, sprite.rect.width);
+                showcasePortrait.rectTransform.sizeDelta = new Vector2(PortraitWidth, height);
+                bubble.anchoredPosition = new Vector2(-40f, height + 8f);
+            }
             if (id != showcaseId)
             {
                 // new character: bubble pops up with a fresh line after the game's focus delay
@@ -917,6 +917,19 @@ namespace OGMultiplayer.Plugin
 
         private void Update()
         {
+            if (!visible && Session != null && Session.ReturnToLobby && (!Session.Connected || HotSeatFlowController.IsActive))
+            {
+                Session.ReturnToLobby = Session.Connected && HotSeatFlowController.IsActive;
+            }
+            if (!visible && Session != null && Session.ReturnToLobby && !HotSeatFlowController.IsActive
+                && SceneManager.GetActiveScene().name == "StartScreen" && Time.unscaledTime - sceneLoadedAt > 0.6f
+                && FindAnyObjectByType<StartScreenMenuController>() != null)
+            {
+                // a round ended and the game went back to its menu: continue in the lobby
+                Session.ReturnToLobby = false;
+                Show(Page.Lobby, 0);
+                return;
+            }
             if (!visible && OnlineSetup.Finished != OnlineSetup.Purpose.None && Session != null && !HotSeatFlowController.IsActive
                 && SceneManager.GetActiveScene().name == "StartScreen" && Time.unscaledTime - sceneLoadedAt > 0.6f
                 && FindAnyObjectByType<StartScreenMenuController>() != null)
@@ -1017,12 +1030,24 @@ namespace OGMultiplayer.Plugin
                     Hide();
                     break;
                 case Page.Connect:
+                    if (Session.Connecting)
+                    {
+                        Session.Disconnect();
+                    }
                     Show(Page.Choice, 1);
                     break;
                 default:
-                    Hide();
+                    LeaveLobby();
                     break;
             }
+        }
+
+        /// <summary>Leaving the lobby always ends the connection (or the bot game).</summary>
+        private void LeaveLobby()
+        {
+            bool offline = Session.IsOffline;
+            Session.Disconnect();
+            Show(Page.Choice, offline ? 2 : 1);
         }
 
         /// <summary>Runs a menu action once per frame, with the game's menu sound.</summary>

@@ -199,7 +199,7 @@ namespace OGMultiplayer.Plugin
             }
             if (members.Count < Protocol.MinPlayers)
             {
-                Reply(Protocol.Error, "Erst mindestens einen Bot hinzufuegen.");
+                Reply(Protocol.Error, "Erst mindestens einen Bot hinzufügen.");
                 return;
             }
             matchId++;

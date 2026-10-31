@@ -63,7 +63,7 @@ namespace OGMultiplayer.Plugin
                 IAsyncResult ar = tcp.BeginConnect(host, port, null, null);
                 if (!ar.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(6)))
                 {
-                    throw new TimeoutException("Zeitueberschreitung beim Verbinden.");
+                    throw new TimeoutException("Zeitüberschreitung beim Verbinden.");
                 }
                 tcp.EndConnect(ar);
                 stream = tcp.GetStream();

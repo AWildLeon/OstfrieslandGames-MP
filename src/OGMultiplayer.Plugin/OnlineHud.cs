@@ -193,7 +193,7 @@ namespace OGMultiplayer.Plugin
             switch (p.Status)
             {
                 case Protocol.StatusLoading:
-                    return "LAEDT";
+                    return "LÄDT";
                 case Protocol.StatusReady:
                     return "BEREIT";
                 case Protocol.StatusPlaying:

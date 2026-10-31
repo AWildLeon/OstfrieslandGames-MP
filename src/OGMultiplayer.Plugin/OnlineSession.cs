@@ -70,6 +70,9 @@ namespace OGMultiplayer.Plugin
         /// <summary>Playing against bots without a server.</summary>
         public bool IsOffline => net is LocalBotServer;
 
+        /// <summary>Set when an online round's hot seat screens closed; the menu reopens the lobby.</summary>
+        public bool ReturnToLobby { get; set; }
+
         public int BotLevel { get; private set; } = Bots.DefaultLevel;
 
         public int BotCount => Lobby.Count(p => p.IsBot);
@@ -136,7 +139,7 @@ namespace OGMultiplayer.Plugin
             }
             if (InitialsEntryOverlay.IsBlocked(ini))
             {
-                LastError = "Bitte andere Initialen waehlen.";
+                LastError = "Bitte andere Initialen wählen.";
                 return;
             }
             if (roomId == null)
@@ -146,7 +149,7 @@ namespace OGMultiplayer.Plugin
             }
             if (charId == null)
             {
-                LastError = "Bitte eine Figur waehlen.";
+                LastError = "Bitte eine Figur wählen.";
                 return;
             }
             LastError = null;
@@ -248,6 +251,7 @@ namespace OGMultiplayer.Plugin
 
         private void ResetConnectionState()
         {
+            ReturnToLobby = false;
             pendingHello = null;
             pendingPassword = null;
             Connected = false;
@@ -291,7 +295,7 @@ namespace OGMultiplayer.Plugin
             }
             if (Lobby.Count < Protocol.MinPlayers)
             {
-                Toast($"Mindestens {Protocol.MinPlayers} Spieler noetig.");
+                Toast($"Mindestens {Protocol.MinPlayers} Spieler nötig.");
                 return;
             }
             Send(Protocol.Start, Protocol.Int((int)discipline));
@@ -307,11 +311,11 @@ namespace OGMultiplayer.Plugin
             }
             if (RoomState == Protocol.StateMatch)
             {
-                return "RUNDE LAEUFT " + dots;
+                return "RUNDE LÄUFT " + dots;
             }
             if (Lobby.Count < Protocol.MinPlayers)
             {
-                return (IsOffline ? "FUEGE BOTS HINZU " : brief ? "WARTE AUF SPIELER " : "WARTE AUF ANDERE SPIELER ") + dots;
+                return (IsOffline ? "FÜGE BOTS HINZU " : brief ? "WARTE AUF SPIELER " : "WARTE AUF ANDERE SPIELER ") + dots;
             }
             if (!IsHost)
             {
@@ -359,6 +363,7 @@ namespace OGMultiplayer.Plugin
                 // controller got closed (abort to menu, kiosk reset, ...)
                 LeaveMatch();
                 controller = null;
+                ReturnToLobby = Connected;
             }
             DriveMatch();
             if (Message != null && Time.unscaledTime > messageUntil)
@@ -512,7 +517,7 @@ namespace OGMultiplayer.Plugin
 
             if (RunFlowController.IsActive)
             {
-                Toast("Story-Lauf aktiv - Runde wird ausgelassen. Bitte ins Hauptmenue wechseln.", 6f);
+                Toast("Story-Lauf aktiv - Runde wird ausgelassen. Bitte ins Hauptmenü wechseln.", 6f);
                 LeaveMatch();
                 return;
             }

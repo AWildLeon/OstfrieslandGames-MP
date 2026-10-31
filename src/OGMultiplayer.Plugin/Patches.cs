@@ -106,7 +106,7 @@ namespace OGMultiplayer.Plugin
             {
                 return true;
             }
-            Session.Toast($"Nur der Host ({Session.HostInitials()}) waehlt die Disziplin.");
+            Session.Toast($"Nur der Host ({Session.HostInitials()}) wählt die Disziplin.");
             return false;
         }
 
@@ -241,7 +241,8 @@ namespace OGMultiplayer.Plugin
         }
 
         /// <summary>True while an online page covers the start screen (or is about to).</summary>
-        internal static bool Covered => OnlineMenu.Visible || OnlineSetup.Finished != OnlineSetup.Purpose.None;
+        internal static bool Covered => OnlineMenu.Visible || OnlineSetup.Finished != OnlineSetup.Purpose.None
+            || (OnlineSession.Instance != null && OnlineSession.Instance.ReturnToLobby && OnlineSession.Instance.Connected);
 
         // While an online page is open the main menu is hidden and ignores input, like during hot seat.
         [HarmonyPrefix]

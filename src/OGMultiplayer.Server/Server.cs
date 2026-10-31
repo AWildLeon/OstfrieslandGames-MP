@@ -364,7 +364,7 @@ public sealed partial class GameServer
             if (authFailures.TryGetValue(client.Address, out List<DateTime>? failures)
                 && failures.Count(t => now - t <= options.AuthFailureWindow) >= options.MaxAuthFailures)
             {
-                Reject(client, "Zu viele falsche Passwoerter. Bitte spaeter erneut versuchen.");
+                Reject(client, "Zu viele falsche Passwörter. Bitte später erneut versuchen.");
                 return;
             }
             if (!ProofMatches(client.Nonce, f[5]))
@@ -385,7 +385,7 @@ public sealed partial class GameServer
         string? roomName = Protocol.NormalizeId(f[4]);
         if (initials == null || character == null || roomName == null)
         {
-            Reject(client, "Ungueltige Initialen, Figur oder Raumname.");
+            Reject(client, "Ungültige Initialen, Figur oder Raumname.");
             return;
         }
         if (!rooms.TryGetValue(roomName, out Room? room))
@@ -431,7 +431,7 @@ public sealed partial class GameServer
         }
         if (room.Match != null)
         {
-            client.Send(Protocol.Encode(Protocol.Error, "Es laeuft bereits eine Partie."));
+            client.Send(Protocol.Encode(Protocol.Error, "Es läuft bereits eine Partie."));
             return;
         }
         if (f.Length < 2 || !Protocol.TryInt(f[1], out int discipline) || discipline < 0 || discipline >= Protocol.DisciplineCount)
@@ -441,7 +441,7 @@ public sealed partial class GameServer
         }
         if (room.Members.Count < Protocol.MinPlayers)
         {
-            client.Send(Protocol.Encode(Protocol.Error, $"Mindestens {Protocol.MinPlayers} Spieler noetig."));
+            client.Send(Protocol.Encode(Protocol.Error, $"Mindestens {Protocol.MinPlayers} Spieler nötig."));
             return;
         }
         var match = new Match(++nextMatchId, discipline, DateTime.UtcNow);
@@ -626,7 +626,7 @@ public sealed partial class GameServer
         }
         if (room.Match != null)
         {
-            client.Send(Protocol.Encode(Protocol.Error, "Waehrend einer Runde geht das nicht."));
+            client.Send(Protocol.Encode(Protocol.Error, "Während einer Runde geht das nicht."));
             return;
         }
         string sub = f.Length > 1 ? f[1] : string.Empty;
