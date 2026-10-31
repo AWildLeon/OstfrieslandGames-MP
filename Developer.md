@@ -217,10 +217,11 @@ Seiten: *Choice* (Mehrspieler-Auswahl), *Connect* (Server, Passwort, Spieler), *
 (Raumliste, Beitritt mit Passwort-Eingabe), *CreateRoom*, *Lobby*. Übergänge folgen dem
 Sitzungszustand (`NeedsConsent`, `Connected`, `InRoom`).
 
-`OnlineMenu` baut Canvas, Texte, Auswahlpfeil und Puls-Effekt aus den Bausteinen des
-Start-Menüs (`ApplyMultiplayerTextStyle`, `ApplyMultiplayerSelectionEffect`,
-Auswahlpfeil-Sprite, Referenzauflösung des Menü-Canvas). Eingaben laufen über `ArcadeInput`
-(Tastatur/Controller) und uGUI-Buttons (Maus). Textfelder (Server, Passwort, Raum) werden
+`OnlineMenu` hat eigene Widgets; das Aussehen kommt zur Laufzeit aus dem Spiel: Canvas-
+Einstellungen und Auswahlpfeil des Start-Menüs, `ApplyMultiplayerTextStyle`,
+`ApplyMultiplayerSelectionEffect`, `PauseMenuTheme` (Skalierung, Puls, Umriss),
+`WhitePixelSprite`. Eingaben laufen über `ArcadeInput` (Tastatur/Controller); Mausklicks über
+eine eigene kleine `MenuClick`-Komponente (kein `Button`, also nie Tastaturfokus). Textfelder (Server, Passwort, Raum) werden
 inline mit `Input.inputString` bearbeitet. Rechts steht die gewählte Figur
 (`bigPortrait`, unten am Bildrand verankert) mit einem Spruch aus `CharacterQuotes`
 in einer selbst gezeichneten 9-Slice-Sprechblase in den Farben der Spiel-Blase.
@@ -477,6 +478,10 @@ Plugin-Releases; Nutzer bauen es bei der Installation selbst.
 ## Konventionen
 
 - Keine Dateien des Spiels ins Repo (auch keine dekompilierten Quellen).
+- **Kein Spielcode im Quellbaum, auch nicht nachgeschrieben.** Spielcode wird nur zur Laufzeit
+  aufgerufen (öffentlich oder per Reflection über `GameBridge`). Statt eine Zuordnung oder
+  Hilfsmethode des Spiels nachzubauen, die Methode des Spiels aufrufen (z. B.
+  `GameBridge.GameScene`, `GameBridge.DisciplineName`).
 - Zugriff auf private Spiel-Interna nur über `GameBridge`/`OnlineSetup`.
 - Sichtbare Texte auf Deutsch in Großbuchstaben wie im Spiel; die Pixel-Schrift kann Umlaute.
 - Protokolländerungen immer in `src/Shared/Protocol.cs` dokumentieren und in Plugin und

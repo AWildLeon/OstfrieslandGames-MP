@@ -181,11 +181,11 @@ namespace OGMultiplayer.Plugin
             text.font = font;
             text.fontSize = size;
             text.color = Color.white;
-            text.alignment = TextAnchor.MiddleCenter;
-            text.horizontalOverflow = HorizontalWrapMode.Wrap;
-            text.verticalOverflow = VerticalWrapMode.Overflow;
-            text.supportRichText = false;
             text.raycastTarget = false;
+            text.supportRichText = false;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
             RectTransform rt = text.rectTransform;
             rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
             rt.sizeDelta = dimensions;

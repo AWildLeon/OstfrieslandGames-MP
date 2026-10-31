@@ -1671,9 +1671,9 @@ namespace OGMultiplayer.Plugin
                     Text text = go.AddComponent<Text>();
                     text.font = GameBridge.Font;
                     text.fontSize = fontSize > 0 ? fontSize : 14;
-                    text.alignment = TextAnchor.MiddleCenter;
-                    text.horizontalOverflow = HorizontalWrapMode.Overflow;
                     text.raycastTarget = false;
+                    text.horizontalOverflow = HorizontalWrapMode.Overflow;
+                    text.alignment = TextAnchor.MiddleCenter;
                     break;
             }
             proxies.Add(go);

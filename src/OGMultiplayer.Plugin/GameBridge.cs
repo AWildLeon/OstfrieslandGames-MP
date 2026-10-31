@@ -46,6 +46,9 @@ namespace OGMultiplayer.Plugin
                 { "ScoreStore.doc", ScoreDocField },
                 { "ScoreStore.Save", ScoreSaveMethod },
                 { "OnlineScoreSync.Send", AccessTools.Method(typeof(OnlineScoreSync), "Send") },
+                { "HotSeatFlowController.GameScene", GameSceneMethod },
+                { "HotSeatScreen.DisciplineName", DisciplineNameMethod },
+                { "BosselnBallVisual.UpdatePixelTrail", AccessTools.Method(typeof(BosselnBallVisual), "UpdatePixelTrail") },
             };
             return members.Where(kv => kv.Value == null).Select(kv => kv.Key);
         }
