@@ -44,7 +44,7 @@ bzw. `OG.exe` und `OG_Data/`). Online spielen Linux und Windows problemlos mitei
 ### NixOS / Nix
 
 ```bash
-nix run github:AWildLeon/Ostfriesland-Games-Multiplayer#install -- "/pfad/zu/Ostfriesland Games"
+nix run github:AWildLeon/OstfrieslandGames-MP#install -- "/pfad/zu/Ostfriesland Games"
 ```
 
 Das entpackt BepInEx 5.4.23.4 (gepinnt per Hash) in den Spielordner und baut das
@@ -53,7 +53,7 @@ Plugin nach `BepInEx/plugins/OGMultiplayer/`.
 Spiel starten (FHS-Umgebung via `steam-run-free`):
 
 ```bash
-nix run github:AWildLeon/Ostfriesland-Games-Multiplayer#play -- "/pfad/zu/Ostfriesland Games"
+nix run github:AWildLeon/OstfrieslandGames-MP#play -- "/pfad/zu/Ostfriesland Games"
 ```
 
 Voraussetzung: `hardware.graphics.enable = true;` in deiner NixOS-Konfiguration.
@@ -64,11 +64,11 @@ Voraussetzung: `hardware.graphics.enable = true;` in deiner NixOS-Konfiguration.
 Benötigt: .NET SDK 8, `unzip`, `curl`.
 
 ```bash
-git clone https://github.com/AWildLeon/Ostfriesland-Games-Multiplayer
+git clone https://github.com/AWildLeon/OstfrieslandGames-MP
 ```
 
 ```bash
-Ostfriesland-Games-Multiplayer/scripts/install.sh "/pfad/zu/Ostfriesland Games"
+OstfrieslandGames-MP/scripts/install.sh "/pfad/zu/Ostfriesland Games"
 ```
 
 ```bash
@@ -173,7 +173,7 @@ Abschalten: `BlockScoreApiWhileOnline = false` (Online-Runden bleiben trotzdem l
 ## Server
 
 ```bash
-nix run github:AWildLeon/Ostfriesland-Games-Multiplayer#server -- --port 27420
+nix run github:AWildLeon/OstfrieslandGames-MP#server -- --port 27420
 ```
 
 oder ohne Nix:
@@ -184,7 +184,7 @@ dotnet run -c Release --project src/OGMultiplayer.Server -- --port 27420
 
 Fertige Server-Binaries (Linux x64/arm64, **Windows x64**: `OGMultiplayer.Server.exe` aus der
 Konsole starten, Admin-Befehle dort eintippen) gibt es unter
-[Releases](https://github.com/AWildLeon/Ostfriesland-Games-Multiplayer/releases).
+[Releases](https://github.com/AWildLeon/OstfrieslandGames-MP/releases).
 
 Optionen: `--port` (Standard 27420), `--bind` (Standard 0.0.0.0),
 `--ready-timeout <s>` (wie lange auf langsame Spieler gewartet wird, Standard 60),
@@ -281,7 +281,7 @@ OGMultiplayer.Server --public --name "Moin-Server" --motd "Willkommen!" \
 
 ```nix
 {
-  inputs.og-multiplayer.url = "github:AWildLeon/Ostfriesland-Games-Multiplayer";
+  inputs.og-multiplayer.url = "github:AWildLeon/OstfrieslandGames-MP";
 
   outputs = { nixpkgs, og-multiplayer, ... }: {
     nixosConfigurations.meinserver = nixpkgs.lib.nixosSystem {

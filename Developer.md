@@ -478,7 +478,7 @@ Plugin-Releases; Nutzer bauen es bei der Installation selbst.
 ## Konventionen
 
 - Keine Dateien des Spiels ins Repo (auch keine dekompilierten Quellen).
-- **Kein Spielcode im Quellbaum, auch nicht nachgeschrieben.** Spielcode wird nur zur Laufzeit
+- **Kein Spielcode im Quellbaum.** Spielcode wird nur zur Laufzeit
   aufgerufen (öffentlich oder per Reflection über `GameBridge`). Statt eine Zuordnung oder
   Hilfsmethode des Spiels nachzubauen, die Methode des Spiels aufrufen (z. B.
   `GameBridge.GameScene`, `GameBridge.DisciplineName`).
