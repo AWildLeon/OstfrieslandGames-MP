@@ -56,6 +56,9 @@ public sealed class ServerOptions
 
     /// <summary>Read admin commands from stdin.</summary>
     public bool Console { get; set; } = true;
+
+    /// <summary>Unix socket for admin consoles (see AdminSocket.cs); null = none.</summary>
+    public string? AdminSocket { get; set; }
 }
 
 public sealed partial class GameServer
@@ -108,6 +111,7 @@ public sealed partial class GameServer
         }
         listener.Start();
         BoundPort = ((IPEndPoint)listener.LocalEndpoint).Port;
+        StartAdminSocket(token);
         started.TrySetResult();
         Log($"Listening on {options.Bind}:{BoundPort} (protocol v{Protocol.Version}, "
             + (PasswordRequired ? "password required)" : "no password)"));
@@ -133,7 +137,7 @@ public sealed partial class GameServer
             lock (sync)
             {
                 IPAddress? ip = (tcp.Client.RemoteEndPoint as IPEndPoint)?.Address;
-                if (ip != null && bans.ContainsKey(ServerState.Normalize(ip)))
+                if (ip != null && bans.TryGetValue(ServerState.Normalize(ip), out BanEntry? ban) && !ban.IsExpired(DateTime.UtcNow))
                 {
                     tcp.Close();
                     continue;
@@ -190,8 +194,26 @@ public sealed partial class GameServer
             SaveState();
         }
         bans = state.Bans.ToDictionary(b => ServerState.Normalize(IPAddress.Parse(b.Ip)));
+        PurgeExpiredBans(DateTime.UtcNow);
         Log($"State geladen: {options.StateFile} ({bans.Count} Bans"
             + (state.PasswordDisabled ? ", Passwort per Admin abgeschaltet" : state.PasswordKeyOverride != null ? ", Passwort per Admin gesetzt" : string.Empty) + ")");
+    }
+
+    /// <summary>Drops bans past their expiry, so a lifted ban's IP leaves the state file too.</summary>
+    private void PurgeExpiredBans(DateTime now)
+    {
+        List<IPAddress> expired = bans.Where(b => b.Value.IsExpired(now)).Select(b => b.Key).ToList();
+        if (expired.Count == 0)
+        {
+            return;
+        }
+        foreach (IPAddress ip in expired)
+        {
+            bans.Remove(ip);
+        }
+        // no addresses: the log only ever carries masked IPs
+        Log($"{expired.Count} Sperre(n) abgelaufen");
+        SaveState();
     }
 
     /// <summary>Persists bans and password changes. Runs under <c>sync</c>.</summary>
@@ -314,6 +336,7 @@ public sealed partial class GameServer
 
     private void Tick(DateTime now)
     {
+        PurgeExpiredBans(now);
         foreach (Room room in rooms.Values.ToList())
         {
             if (room.Match != null)
@@ -501,13 +524,16 @@ public sealed partial class GameServer
     private string DocumentList() => string.Join(",", documents.Keys.OrderBy(k => k));
 
     /// <summary>IP for the log; masked on public servers unless --log-ips.</summary>
-    private string LogAddress(Client client)
+    private string LogAddress(Client client) => options.LogIps ? client.Remote : MaskAddress(client.Address);
+
+    /// <summary>The address as the log may show it: IPv4 without its last 8 bits, IPv6 without its last 80.</summary>
+    private string MaskAddress(IPAddress address)
     {
         if (options.LogIps)
         {
-            return client.Remote;
+            return address.ToString();
         }
-        byte[] bytes = client.Address.GetAddressBytes();
+        byte[] bytes = ServerState.Normalize(address).GetAddressBytes();
         if (bytes.Length == 4)
         {
             return $"{bytes[0]}.{bytes[1]}.{bytes[2]}.x";
@@ -1137,9 +1163,14 @@ public sealed partial class GameServer
         LeaveRoom(client, reason, notify: false);
     }
 
-    internal static void Log(string message)
+    internal void Log(string message) => Log(message, null);
+
+    /// <summary>Writes to stdout and to the admin sessions, except the one named.</summary>
+    private void Log(string message, AdminSession? except)
     {
-        Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}");
+        string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}";
+        Console.WriteLine(line);
+        ForwardLog(line, except);
     }
 }
 

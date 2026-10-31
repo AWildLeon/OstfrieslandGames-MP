@@ -54,6 +54,10 @@ public sealed class ServerState
         }
         state.Bans ??= new List<BanEntry>();
         state.Bans.RemoveAll(b => b == null || !IPAddress.TryParse(b.Ip, out _));
+        foreach (BanEntry b in state.Bans)
+        {
+            b.ExpiresUtc = b.Expiry;
+        }
         return state;
     }
 
@@ -103,4 +107,28 @@ public sealed class BanEntry
     public string? Player { get; set; }
 
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>When the ban lifts by itself; at most <see cref="MaxDuration"/> after creation.</summary>
+    public DateTime? ExpiresUtc { get; set; }
+
+    /// <summary>Length of a ban without an explicit duration.</summary>
+    public static readonly TimeSpan DefaultDuration = TimeSpan.FromDays(30);
+
+    /// <summary>No ban lasts longer: an IP is never blocked for good.</summary>
+    public static readonly TimeSpan MaxDuration = TimeSpan.FromDays(365);
+
+    /// <summary>
+    /// Expiry clamped to <see cref="MaxDuration"/>. Bans from state files written before
+    /// bans expired have none and run for the maximum, counted from their creation.
+    /// </summary>
+    public DateTime Expiry
+    {
+        get
+        {
+            DateTime max = CreatedUtc + MaxDuration;
+            return ExpiresUtc == null || ExpiresUtc > max ? max : ExpiresUtc.Value;
+        }
+    }
+
+    public bool IsExpired(DateTime now) => now >= Expiry;
 }

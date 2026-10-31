@@ -71,7 +71,8 @@ src/OGMultiplayer.Plugin/           BepInEx-5-Plugin, netstandard2.1
   OnlineHud.cs                      Overlay: Spielerliste, Banner, Meldungen
 src/OGMultiplayer.Server/           .NET-8-Server, keine Abhängigkeiten
   Server.cs                         Netzwerk, Räume, Runden, Auth, Bots
-  Admin.cs                          Admin-Konsole (stdin), Shutdown
+  Admin.cs                          Admin-Befehle (stdin), Shutdown
+  AdminSocket.cs                    Admin-Konsole auf einem Unix-Socket (--admin-socket)
   State.cs                          State-Datei (Bans, Passwort-Override)
   Program.cs                        CLI-Optionen, Signale
 tests/OGMultiplayer.Server.Tests/   xUnit-Tests gegen echten Server auf Port 0
@@ -342,14 +343,22 @@ Pro Verbindung gilt ein Limit von 30 Nachrichten/Sekunde (`Kick`).
 
 ### Admin-Konsole und State-Datei
 
-Befehle kommen zeilenweise von stdin (`Admin.cs`, `help`). `shutdown` kündigt den Neustart
+Befehle kommen zeilenweise von stdin (`Admin.cs`, `help`) oder über `--admin-socket`
+(`AdminSocket.cs`): jede Socket-Verbindung ist eine eigene Konsole mit eigenem Ausgabekanal
+(gebunden, 1000 Zeilen, älteste fallen weg). `Log` schreibt auf stdout und in alle Sitzungen
+außer der, die den Befehl geschickt hat; Antworten von `ExecuteAdmin` gehen nur an die fragende
+Sitzung. Ende der Eingabe schließt die Sitzung, nachdem die Antworten raus sind. Der Socket
+wird mit 0600 angelegt, ein verwaister beim Start ersetzt und beim Beenden gelöscht; Pfade über
+107 Bytes lehnt der Server ab. `shutdown` kündigt den Neustart
 im Spiel an (`MSG`), trennt alle mit `BYE` und beendet den Server; SIGTERM/Strg+C laufen
 denselben Weg.
 
 Bans und Passwort-Änderungen per Konsole landen in einer JSON-State-Datei
 (`--state-file`, Standard `./ogmultiplayer-state.json`): atomar geschrieben (Temp-Datei +
 Rename), Modus 0600. Eine kaputte Datei verhindert den Start, damit Bans nicht still
-verloren gehen.
+verloren gehen. Jeder Ban hat ein Ablaufdatum (`ExpiresUtc`, Standard 30 Tage, auf ein Jahr
+ab `CreatedUtc` begrenzt, auch beim Laden); der Tick entfernt abgelaufene Bans und schreibt
+die Datei neu, ins Log nur die Anzahl, nie die IP.
 
 ## Testen
 

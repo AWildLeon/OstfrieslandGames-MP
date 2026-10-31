@@ -81,7 +81,29 @@
         });
 
       nixosModules.default = { config, lib, pkgs, ... }:
-        let cfg = config.services.ogmultiplayer; in
+        let
+          cfg = config.services.ogmultiplayer;
+          adminSocket = "/run/ogmultiplayer/admin.sock";
+          # Admin console on the server's socket: interactive without arguments (live log
+          # included), otherwise one command. Root only: the socket is owner-only.
+          adminCli = pkgs.writeShellApplication {
+            name = "ogmp-admin";
+            runtimeInputs = [ pkgs.socat ];
+            text = ''
+              sock=${adminSocket}
+              if [ ! -S "$sock" ]; then
+                echo "ogmp-admin: $sock nicht erreichbar (laeuft der Dienst? als root ausfuehren)" >&2
+                exit 1
+              fi
+              if [ $# -gt 0 ]; then
+                printf '%s\n' "$*" | socat -t 5 - "UNIX-CONNECT:$sock"
+              else
+                echo "Admin-Konsole ('help' fuer Befehle, Strg-D beendet)"
+                exec socat "READLINE,history=${HOME:-/root}/.ogmp-admin_history" "UNIX-CONNECT:$sock"
+              fi
+            '';
+          };
+        in
         {
           options.services.ogmultiplayer = {
             enable = lib.mkEnableOption "Ostfriesland Games Online-Mehrspieler-Server";
@@ -164,6 +186,15 @@
               default = false;
               description = "Volle IP-Adressen ins Log schreiben (bei public sonst gekürzt).";
             };
+            adminSocket = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = ''
+                Admin-Konsole auf ${adminSocket} (nur root). `ogmp-admin` oeffnet sie interaktiv
+                wie stdin/stdout des Servers (mit Live-Log), `ogmp-admin <befehl>` fuehrt einen
+                Befehl aus. Antworten landen nicht im Journal.
+              '';
+            };
             extraArgs = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [ ];
@@ -192,6 +223,7 @@
                   ++ lib.optionals (cfg.maxRooms != null) [ "--max-rooms" (toString cfg.maxRooms) ]
                   ++ lib.optionals (cfg.maxConnectionsPerIp != null) [ "--max-per-ip" (toString cfg.maxConnectionsPerIp) ]
                   ++ lib.optional cfg.logIps "--log-ips"
+                  ++ lib.optionals cfg.adminSocket [ "--admin-socket" adminSocket ]
                   ++ cfg.extraArgs
                 );
                 LoadCredential =
@@ -203,6 +235,9 @@
                 # bans and admin password changes (state.json)
                 StateDirectory = "ogmultiplayer";
                 StateDirectoryMode = "0700";
+                # admin socket; the directory keeps everyone but root and the service out
+                RuntimeDirectory = "ogmultiplayer";
+                RuntimeDirectoryMode = "0700";
                 Restart = "on-failure";
                 NoNewPrivileges = true;
                 ProtectSystem = "strict";
@@ -212,13 +247,14 @@
                 ProtectKernelTunables = true;
                 ProtectKernelModules = true;
                 ProtectControlGroups = true;
-                RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
+                RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ] ++ lib.optional cfg.adminSocket "AF_UNIX";
                 LockPersonality = true;
                 MemoryDenyWriteExecute = false; # .NET JIT
               };
               environment.DOTNET_CLI_TELEMETRY_OPTOUT = "1";
             };
             networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
+            environment.systemPackages = lib.mkIf cfg.adminSocket [ adminCli ];
           };
         };
 

@@ -165,6 +165,14 @@ for (int i = 0; i < args.Length; i++)
         case "--no-console":
             options.Console = false;
             break;
+        case "--admin-socket":
+            if (string.IsNullOrEmpty(next))
+            {
+                return Fail("--admin-socket braucht einen Pfad");
+            }
+            options.AdminSocket = next;
+            i++;
+            break;
         case "-h":
         case "--help":
             Console.WriteLine("""
@@ -181,6 +189,8 @@ for (int i = 0; i < args.Length; i++)
                                              (Standard ./ogmultiplayer-state.json, Env OGMP_STATE_FILE)
                       --no-state             nichts speichern
                       --no-console           keine Admin-Befehle von stdin lesen
+                      --admin-socket <pfad>  Admin-Konsole auf einem Unix-Socket (nur Besitzer), z. B.
+                                             socat READLINE UNIX-CONNECT:<pfad>
 
                 Öffentlicher Server:
                       --public               Public-Modus: Impressum + Datenschutz Pflicht, Spieler stimmen
@@ -195,7 +205,7 @@ for (int i = 0; i < args.Length; i++)
                       --max-per-ip <n>       Verbindungen pro IP (0 = unbegrenzt)
                       --log-ips              volle IP-Adressen ins Log schreiben
 
-                Admin-Befehle (stdin, 'help' fuer alle): status, players, rooms, say, kick, ban,
+                Admin-Befehle (stdin oder --admin-socket, 'help' fuer alle): status, players, rooms, say, kick, ban,
                 endmatch, closeroom, password, shutdown [sekunden] [grund] ...
                 """);
             return 0;

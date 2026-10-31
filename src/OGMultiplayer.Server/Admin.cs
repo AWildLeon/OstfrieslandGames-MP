@@ -24,9 +24,9 @@ public sealed partial class GameServer
         ("say <text>", "Nachricht an alle Spieler"),
         ("sayroom <raum> <text>", "Nachricht an einen Raum"),
         ("kick <id> [grund]", "Spieler trennen"),
-        ("ban <id|ip> [grund]", "IP dauerhaft sperren und trennen"),
+        ("ban <id|ip> [dauer] [grund]", "IP sperren und trennen; dauer z. B. 12h, 30d, 8w, 1y (Standard 30d, max. 1y)"),
         ("unban <ip>", "Sperre aufheben"),
-        ("bans", "gesperrte IPs mit Grund und Datum"),
+        ("bans", "gesperrte IPs mit Grund, Datum und Ablauf"),
         ("endmatch <raum>", "laufende Runde beenden (Unfertige = 0 Punkte)"),
         ("closeroom <raum> [grund]", "Raum schließen, Spieler zurück in die Raumliste"),
         ("motd <text|off>", "Nachricht in der Raumliste (bis zum Neustart)"),
@@ -79,7 +79,9 @@ public sealed partial class GameServer
 
     // ------------------------------------------------------------------ commands
 
-    public string ExecuteAdmin(string line)
+    public string ExecuteAdmin(string line) => ExecuteAdmin(line, null);
+
+    private string ExecuteAdmin(string line, AdminSession? origin)
     {
         string trimmed = line.Trim();
         int space = trimmed.IndexOf(' ');
@@ -89,9 +91,9 @@ public sealed partial class GameServer
         {
             return string.Empty;
         }
-        // never write a password to the log
+        // never write a password to the log, and IPs (ban/unban) only masked
         Log(cmd == "password" && !rest.Equals("off", StringComparison.OrdinalIgnoreCase) && !rest.Equals("reset", StringComparison.OrdinalIgnoreCase)
-            ? "[admin] password ***" : $"[admin] {trimmed}");
+            ? "[admin] password ***" : "[admin] " + MaskAddresses(trimmed), origin);
         try
         {
             lock (sync)
@@ -123,6 +125,9 @@ public sealed partial class GameServer
             return "Fehler: " + ex.Message;
         }
     }
+
+    private string MaskAddresses(string text) => string.Join(' ', text.Split(' ').Select(t =>
+        (t.Contains('.') || t.Contains(':')) && IPAddress.TryParse(t, out IPAddress? ip) ? MaskAddress(ip) : t));
 
     private static string HelpText()
     {
@@ -238,7 +243,26 @@ public sealed partial class GameServer
         string[] parts = rest.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0)
         {
-            return "Aufruf: ban <id|ip> [grund]";
+            return "Aufruf: ban <id|ip> [dauer] [grund]";
+        }
+        TimeSpan duration = BanEntry.DefaultDuration;
+        if (parts.Length > 1)
+        {
+            string[] tail = parts[1].Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            if (TryParseDuration(tail[0], out TimeSpan d))
+            {
+                duration = d;
+                parts = tail.Length > 1 ? new[] { parts[0], tail[1] } : new[] { parts[0] };
+            }
+        }
+        if (duration <= TimeSpan.Zero)
+        {
+            return "Die Dauer muss positiv sein.";
+        }
+        bool clamped = duration > BanEntry.MaxDuration;
+        if (clamped)
+        {
+            duration = BanEntry.MaxDuration;
         }
         IPAddress? ip = null;
         string? player = null;
@@ -258,7 +282,9 @@ public sealed partial class GameServer
             return $"'{parts[0]}' ist weder Spieler-ID noch IP.";
         }
         ip = ServerState.Normalize(ip);
-        bans[ip] = new BanEntry { Ip = ip.ToString(), Reason = parts.Length > 1 ? parts[1] : null, Player = player, CreatedUtc = DateTime.UtcNow };
+        DateTime now = DateTime.UtcNow;
+        var entry = new BanEntry { Ip = ip.ToString(), Reason = parts.Length > 1 ? parts[1] : null, Player = player, CreatedUtc = now, ExpiresUtc = now + duration };
+        bans[ip] = entry;
         SaveState();
         string reason = parts.Length > 1 ? "Gesperrt: " + parts[1] : "Vom Admin gesperrt.";
         int n = 0;
@@ -267,7 +293,39 @@ public sealed partial class GameServer
             Kick(c, reason);
             n++;
         }
-        return $"{ip} gesperrt, {n} Verbindung(en) getrennt.";
+        return $"{ip} gesperrt bis {entry.Expiry.ToLocalTime():yyyy-MM-dd HH:mm}" + (clamped ? " (auf 1 Jahr begrenzt)" : string.Empty)
+            + $", {n} Verbindung(en) getrennt.";
+    }
+
+    /// <summary>Parses "12h", "30d", "8w" or "1y" (a year is 365 days).</summary>
+    internal static bool TryParseDuration(string text, out TimeSpan duration)
+    {
+        duration = TimeSpan.Zero;
+        if (text.Length < 2 || !int.TryParse(text[..^1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int n))
+        {
+            return false;
+        }
+        double days;
+        switch (char.ToLowerInvariant(text[^1]))
+        {
+            case 'h':
+                duration = TimeSpan.FromHours(n);
+                return true;
+            case 'd':
+                days = n;
+                break;
+            case 'w':
+                days = n * 7.0;
+                break;
+            case 'y':
+                days = n * 365.0;
+                break;
+            default:
+                return false;
+        }
+        // anything past the maximum is clamped by the caller; keep TimeSpan from overflowing
+        duration = TimeSpan.FromDays(Math.Min(days, 100 * 365.0));
+        return true;
     }
 
     private string Unban(string rest)
@@ -293,7 +351,7 @@ public sealed partial class GameServer
             return "Keine Sperren.";
         }
         return string.Join("\n", bans.Values.OrderBy(b => b.CreatedUtc).Select(b =>
-            $"{b.Ip,-39} {b.CreatedUtc.ToLocalTime():yyyy-MM-dd HH:mm}  {b.Player ?? "-",-3}  {b.Reason ?? "-"}"));
+            $"{b.Ip,-39} {b.CreatedUtc.ToLocalTime():yyyy-MM-dd HH:mm} bis {b.Expiry.ToLocalTime():yyyy-MM-dd HH:mm}  {b.Player ?? "-",-3}  {b.Reason ?? "-"}"));
     }
 
     private string EndMatch(string rest)

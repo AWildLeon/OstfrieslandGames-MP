@@ -367,6 +367,58 @@ public class StateTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task BansDefaultTo30DaysAndNeverExceedOneYear()
+    {
+        await using (var fx = new ServerFixture(stateFile: StateFile))
+        {
+            fx.Server.ExecuteAdmin("ban 192.0.2.1 spam");
+            fx.Server.ExecuteAdmin("ban 192.0.2.2 12h");
+            Assert.Contains("auf 1 Jahr begrenzt", fx.Server.ExecuteAdmin("ban 192.0.2.3 5y viel zu lang"));
+            Assert.Contains("positiv", fx.Server.ExecuteAdmin("ban 192.0.2.4 0d"));
+        }
+        Dictionary<string, BanEntry> bans = ServerState.Load(StateFile).Bans.ToDictionary(b => b.Ip);
+        TimeSpan Length(string ip) => bans[ip].ExpiresUtc!.Value - bans[ip].CreatedUtc;
+        Assert.Equal(TimeSpan.FromDays(30), Length("192.0.2.1"));
+        Assert.Equal("spam", bans["192.0.2.1"].Reason);
+        Assert.Equal(TimeSpan.FromHours(12), Length("192.0.2.2"));
+        Assert.Null(bans["192.0.2.2"].Reason);
+        Assert.Equal(TimeSpan.FromDays(365), Length("192.0.2.3"));
+        Assert.Equal("viel zu lang", bans["192.0.2.3"].Reason);
+        Assert.False(bans.ContainsKey("192.0.2.4"));
+    }
+
+    [Fact]
+    public async Task ExpiredBansAreLiftedAndForgotten()
+    {
+        DateTime now = DateTime.UtcNow;
+        new ServerState
+        {
+            Bans =
+            {
+                // expired on its own
+                new BanEntry { Ip = "127.0.0.1", CreatedUtc = now.AddDays(-31), ExpiresUtc = now.AddDays(-1) },
+                // written before bans expired: runs for the maximum, so gone after a year
+                new BanEntry { Ip = "203.0.113.7", CreatedUtc = now.AddDays(-400) },
+                // a hand-edited expiry past the maximum is clamped as well
+                new BanEntry { Ip = "203.0.113.8", CreatedUtc = now.AddDays(-366), ExpiresUtc = now.AddYears(5) },
+                new BanEntry { Ip = "203.0.113.9", CreatedUtc = now, ExpiresUtc = now.AddDays(30) },
+            },
+        }.Save(StateFile);
+
+        await using (var fx = new ServerFixture(stateFile: StateFile))
+        {
+            using var a = fx.Connect();
+            Assert.Equal(Protocol.Welcome, a.Hello("AAA")[0]);
+            string bans = fx.Server.ExecuteAdmin("bans");
+            Assert.DoesNotContain("127.0.0.1", bans);
+            Assert.DoesNotContain("203.0.113.7", bans);
+            Assert.DoesNotContain("203.0.113.8", bans);
+            Assert.Contains("203.0.113.9", bans);
+        }
+        Assert.Equal(new[] { "203.0.113.9" }, ServerState.Load(StateFile).Bans.Select(b => b.Ip));
+    }
+
     private static bool IsRefused(ServerFixture fx)
     {
         try
@@ -689,5 +741,114 @@ public class PasswordStorageTests : IDisposable
         Assert.NotEqual(Protocol.RoomKey("pw", "a"), Protocol.RoomKey("pw", "b"));
         Assert.Equal(64, Protocol.RoomKey("pw", "a").Length);
         Assert.Equal(string.Empty, Protocol.RoomKey("", "a"));
+    }
+}
+
+public class AdminSocketTests : IDisposable
+{
+    // socket paths may be at most 107 bytes, so not under a long $TMPDIR
+    private readonly string dir = Directory.CreateDirectory(Path.Combine(
+        OperatingSystem.IsWindows() ? Path.GetTempPath() : "/tmp", "ogmp-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+
+    private string SocketPath => Path.Combine(dir, "admin.sock");
+
+    public void Dispose() => Directory.Delete(dir, recursive: true);
+
+    private sealed class AdminConsole : IDisposable
+    {
+        private readonly Socket socket = new(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        private readonly StreamReader reader;
+        private readonly StreamWriter writer;
+
+        public AdminConsole(string path)
+        {
+            socket.Connect(new UnixDomainSocketEndPoint(path));
+            var stream = new NetworkStream(socket);
+            reader = new StreamReader(stream, new UTF8Encoding(false));
+            writer = new StreamWriter(stream, new UTF8Encoding(false)) { NewLine = "\n", AutoFlush = true };
+        }
+
+        public void Send(string line) => writer.WriteLine(line);
+
+        public void CloseInput() => socket.Shutdown(SocketShutdown.Send);
+
+        /// <summary>Reads until a line containing the text arrives; returns it.</summary>
+        public string WaitFor(string text)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                string? line = reader.ReadLineAsync(cts.Token).AsTask().GetAwaiter().GetResult();
+                Assert.NotNull(line);
+                if (line!.Contains(text))
+                {
+                    return line;
+                }
+            }
+        }
+
+        public string ReadToEnd()
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            return reader.ReadToEndAsync(cts.Token).GetAwaiter().GetResult();
+        }
+
+        public void Dispose() => socket.Dispose();
+    }
+
+    [Fact]
+    public async Task SocketBehavesLikeTheConsole()
+    {
+        await using var fx = new ServerFixture(configure: o =>
+        {
+            o.AdminSocket = SocketPath;
+            o.LogIps = false; // as on a public server
+        });
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(SocketPath));
+        }
+        using var admin = new AdminConsole(SocketPath);
+        using var watcher = new AdminConsole(SocketPath);
+
+        admin.Send("help");
+        admin.WaitFor("shutdown");
+
+        // the live log reaches every session, the command line masked
+        admin.Send("ban 192.0.2.55 spam");
+        Assert.Contains("192.0.2.55 gesperrt", admin.WaitFor("gesperrt"));
+        Assert.Contains("[admin] ban 192.0.2.x spam", watcher.WaitFor("[admin] ban"));
+
+        // replies stay with the session that asked
+        using var player = fx.Connect();
+        player.Hello("AAA");
+        watcher.WaitFor("connected from");
+        admin.Send("players");
+        Assert.Contains("AAA", admin.WaitFor("AAA"));
+    }
+
+    [Fact]
+    public async Task OneShotCommandEndsTheSession()
+    {
+        await using var fx = new ServerFixture(configure: o => o.AdminSocket = SocketPath);
+        using var admin = new AdminConsole(SocketPath);
+        admin.Send("status");
+        admin.CloseInput();
+        string output = admin.ReadToEnd();
+        Assert.Contains("Verbindungen:", output);
+        Assert.DoesNotContain("[admin] status", output);
+    }
+
+    [Fact]
+    public async Task StaleSocketIsReplacedAndRemovedOnShutdown()
+    {
+        File.WriteAllText(SocketPath, "left over");
+        await using (var fx = new ServerFixture(configure: o => o.AdminSocket = SocketPath))
+        {
+            using var admin = new AdminConsole(SocketPath);
+            admin.Send("status");
+            admin.WaitFor("Verbindungen:");
+        }
+        Assert.False(File.Exists(SocketPath));
     }
 }

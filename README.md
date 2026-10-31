@@ -187,8 +187,19 @@ Port, Bind-Adresse und Passwort gehen auch per `OGMP_PORT` / `OGMP_BIND` /
 
 ### Admin-Befehle
 
-Der Server liest Befehle von seiner Standardeingabe – einfach ins Terminal tippen, in dem er läuft
-(für Dauerbetrieb z. B. in `tmux`/`screen`):
+Der Server liest Befehle von seiner Standardeingabe – einfach ins Terminal tippen, in dem er läuft.
+Ohne Terminal (Dienst) gibt es die Admin-Konsole auf einem Unix-Socket: `--admin-socket <pfad>`.
+Jede Verbindung verhält sich wie stdin/stdout des Servers – Befehle hinein, Antworten und das
+Live-Log heraus:
+
+```bash
+socat READLINE UNIX-CONNECT:/pfad/admin.sock          # interaktiv
+echo bans | socat -t 5 - UNIX-CONNECT:/pfad/admin.sock  # ein Befehl
+```
+
+Antworten gehen nur an die fragende Verbindung, nie ins Log (`players` und `bans` zeigen volle
+IPs); im Log steht nur `[admin] <befehl>`, IPs darin gekürzt wie sonst auch. Der Socket ist nur
+für seinen Besitzer zugänglich.
 
 | Befehl | Wirkung |
 | --- | --- |
@@ -198,7 +209,7 @@ Der Server liest Befehle von seiner Standardeingabe – einfach ins Terminal tip
 | `rooms` | Räume mit Host, Bots und laufender Runde |
 | `say <text>` / `sayroom <raum> <text>` | Nachricht, erscheint im Spiel |
 | `kick <id> [grund]` | Spieler trennen |
-| `ban <id\|ip> [grund]` / `unban <ip>` / `bans` | IP dauerhaft sperren / entsperren / auflisten |
+| `ban <id\|ip> [dauer] [grund]` / `unban <ip>` / `bans` | IP sperren / entsperren / auflisten; Dauer z. B. `12h`, `30d`, `8w`, `1y` (Standard 30 Tage, höchstens 1 Jahr) |
 | `endmatch <raum>` | laufende Runde beenden, Unfertige bekommen 0 |
 | `closeroom <raum> [grund]` | Raum schließen, Spieler zurück in die Raumliste |
 | `motd <text\|off>` | Nachricht in der Raumliste ändern |
@@ -207,7 +218,9 @@ Der Server liest Befehle von seiner Standardeingabe – einfach ins Terminal tip
 | `shutdown [sekunden] [grund]` / `shutdown cancel` | Server beenden, optional mit Countdown im Spiel |
 
 Bans und Passwort-Änderungen landen in der State-Datei (JSON, nur für den Besitzer lesbar,
-atomar geschrieben) und überleben Neustarts. Ist die Datei kaputt, startet der Server nicht,
+atomar geschrieben) und überleben Neustarts. Abgelaufene Bans werden aus der Datei gelöscht;
+keine IP bleibt länger als ein Jahr gesperrt (Bans aus älteren State-Dateien ohne Ablauf
+laufen ein Jahr ab ihrer Erstellung). Ist die Datei kaputt, startet der Server nicht,
 statt still alle Bans zu vergessen. Passwörter stehen dort nie im Klartext (siehe unten), und
 der Befehl `password …` erscheint im Log nur als `password ***`.
 
@@ -286,6 +299,8 @@ OGMultiplayer.Server --public --name "Moin-Server" --motd "Willkommen!" \
 Der Dienst läuft als `DynamicUser` mit systemd-Härtung; Bans liegen in
 `/var/lib/ogmultiplayer/state.json`. Passwort- und Rechtstext-Dateien werden per
 `LoadCredential` eingelesen (dürfen also dem Dienst-Benutzer unzugänglich sein).
+Die Admin-Konsole liegt auf `/run/ogmultiplayer/admin.sock` (`adminSocket`, Standard an):
+als root `ogmp-admin` öffnet sie interaktiv mit Live-Log, `ogmp-admin bans` führt einen Befehl aus.
 
 > Das Passwort schützt den Zugang, verschlüsselt aber nicht die Spieldaten (Initialen,
 > Punkte). Wer mehr will: VPN (z. B. WireGuard, Tailscale).
