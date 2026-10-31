@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    In-game tests (BepInEx plugin, never installed by the normal install scripts).
+    Run them with scripts/game-test.sh; build:  dotnet build -c Release -p:GameDir="/path/to/Ostfriesland Games"
+    Game and BepInEx assemblies are referenced from your local install (BepInEx must
+    already be unpacked into the game folder). They are never copied into the output
+    or the repository, and the build needs no NuGet packages.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>OGMultiplayer.GameTests</AssemblyName>
+    <RootNamespace>OGMultiplayer.GameTests</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <GameDir Condition="'$(GameDir)' == '' and '$(OG_GAME_DIR)' != ''">$(OG_GAME_DIR)</GameDir>
+    <GameManagedDir>$(GameDir)/OG_Data/Managed</GameManagedDir>
+    <BepInExCoreDir Condition="'$(BepInExCoreDir)' == ''">$(GameDir)/BepInEx/core</BepInExCoreDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OGMultiplayer.Plugin/OGMultiplayer.Plugin.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx" HintPath="$(BepInExCoreDir)/BepInEx.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(BepInExCoreDir)/0Harmony.dll" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp" HintPath="$(GameManagedDir)/Assembly-CSharp.dll" Private="false" />
+    <Reference Include="UnityEngine" HintPath="$(GameManagedDir)/UnityEngine.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(GameManagedDir)/UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(GameManagedDir)/UnityEngine.InputLegacyModule.dll" Private="false" />
+    <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(GameManagedDir)/UnityEngine.TextRenderingModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UI" HintPath="$(GameManagedDir)/UnityEngine.UI.dll" Private="false" />
+    <Reference Include="UnityEngine.UIModule" HintPath="$(GameManagedDir)/UnityEngine.UIModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AnimationModule" HintPath="$(GameManagedDir)/UnityEngine.AnimationModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AudioModule" HintPath="$(GameManagedDir)/UnityEngine.AudioModule.dll" Private="false" />
+    <Reference Include="UnityEngine.Physics2DModule" HintPath="$(GameManagedDir)/UnityEngine.Physics2DModule.dll" Private="false" />
+    <Reference Include="UnityEngine.ScreenCaptureModule" HintPath="$(GameManagedDir)/UnityEngine.ScreenCaptureModule.dll" Private="false" />
+  </ItemGroup>
+
+  <Target Name="CheckGameDir" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(GameManagedDir)/Assembly-CSharp.dll')" Text="Spiel nicht gefunden. Bitte -p:GameDir=&quot;/pfad/zu/Ostfriesland Games&quot; oder OG_GAME_DIR setzen (Ordner mit OG.x86_64 bzw. OG.exe)." />
+    <Error Condition="!Exists('$(BepInExCoreDir)/BepInEx.dll')" Text="BepInEx nicht gefunden ($(BepInExCoreDir)). Zuerst BepInEx 5 ins Spiel entpacken (scripts/install.sh bzw. scripts/install.ps1 erledigt das)." />
+  </Target>
+
+</Project>

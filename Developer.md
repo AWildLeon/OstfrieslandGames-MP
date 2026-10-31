@@ -77,9 +77,11 @@ src/OGMultiplayer.Server/           .NET-8-Server, keine Abhängigkeiten
   State.cs                          State-Datei (Bans, Passwort-Override)
   Program.cs                        CLI-Optionen, Signale
 tests/OGMultiplayer.Server.Tests/   xUnit-Tests gegen echten Server auf Port 0
+tests/OGMultiplayer.GameTests/      Test-Mod für Spieltests (scripts/game-test.sh)
 scripts/install.sh                  BepInEx installieren + Plugin bauen (Linux/macOS-Shell)
 scripts/install.ps1, install.cmd    dasselbe für Windows (PowerShell 5.1+, Doppelklick-Wrapper)
 scripts/update-bepinex.sh           BepInEx-Pin auf neueste 5.x-Version heben
+scripts/game-test.sh                Spieltests: zwei Instanzen + Test-Server unter Xvfb
 flake.nix                           Pakete, Apps (install/play/server), NixOS-Modul
 .github/                            CI, Wartung, Release, Dependabot
 docs/screenshots/                   Bilder für diese Doku
@@ -261,7 +263,20 @@ Eingaben wird der **Szenenzustand** übertragen (`SceneMirror.cs`):
   quantisiert, damit „unverändert“ exakt gleich ist; Transform-Werte werden nur bei
   `Transform.hasChanged` gelesen. Eine Zeile bleibt unter `MaxViewChars`, der Rest folgt im
   nächsten Takt (Round-Robin). Während des Spiels erzeugte Objekte gehen mit Art und
-  Sortierung raus und werden beim Zuschauer als schlichte Stellvertreter angelegt.
+  Sortierung raus (Kinder erst nach ihrem neuen Elternobjekt) und werden beim Zuschauer als
+  schlichte Stellvertreter angelegt. Neue Objekte werden alle 0,3 s gesucht.
+- **Datenmenge** (`MirrorWire`): binär statt Text – pro Objekt Nummer + Feldmaske, Zahlen als
+  Zickzack-Varint der *Differenz* zum zuletzt gesendeten Wert (meist 1 Byte), Pfade, Sprite-
+  Namen und Sortierebenen über eine String-Tabelle (einmal definiert, danach nur Index), Zeile
+  mit Deflate, wenn das kleiner ist (spart noch rund ein Drittel), base64 in der Zeile. Sprites,
+  die weiter als eine halbe Bildgröße außerhalb der Kamera liegen, werden erst gesendet, wenn
+  sie näher kommen (das Update, mit dem sie den Bereich verlassen, geht noch raus). In Bosseln
+  sind es so rund 2 KB/s statt vorher rund 10 KB/s. Weil Differenzen aufeinander aufbauen,
+  prüft der Zuschauer die Bildnummern; bei einer Lücke ignoriert er alles bis zum nächsten
+  Vollstand (Kopf-Bit *Reset*: String-Tabelle und Zuordnungen beginnen neu) und fordert ihn an.
+- Spuren (Ball-Pixelspur in Bosseln) rechnet der Zuschauer selbst aus der gespiegelten
+  Ballposition (`BosselnBallVisual.UpdatePixelTrail` per Reflection), der Rest des Ballskripts
+  bleibt eingefroren.
 - Der Zuschauer lädt die Szene neu, lässt ihre Skripte zwei Frames lang aufbauen und friert
   dann ein: Spiel-`MonoBehaviour`s (außer Pausemenü und UI-Bausteine) aus, Coroutinen
   gestoppt, Animatoren aus, Physik aus, Szenen-Audio stumm. Positionen gleiten den
@@ -426,11 +441,25 @@ spricht das Protokoll per TCP: Auth (richtig/falsch/fehlend/Sperre), kompletter
 Rundenablauf, Abbruch, Raumlimit, Admin-Befehle, Shutdown, State-Datei über Neustarts,
 Bots. Läuft in der CI.
 
-**Im Spiel (manuell, nicht im Repo):** Für die Entwicklung liefen zwei Spielinstanzen unter
-`xvfb-run` (llvmpipe, `vblank_mode=0`) mit einem kleinen zusätzlichen BepInEx-Test-Plugin,
-das Menüs per Reflection auslöst, Runden über `TryCompleteTurn` beendet, die Sprache auf
-Deutsch stellt und Screenshots macht. Echte Tastendrücke kamen per `xdotool`. Die zweite
-Instanz war eine Hardlink-Kopie des Spielordners mit eigenem `BepInEx/`.
+**Im Spiel:** `tests/OGMultiplayer.GameTests` ist ein Test-Mod (BepInEx-Plugin, wird nie von
+den Installationsskripten installiert). `scripts/game-test.sh "/pfad/zum/Spiel" [szenario …]`
+baut Plugin, Test-Mod und Server, legt zwei Spielinstanzen in einem temporären Ordner an
+(Spieldateien als Hardlinks, eigenes `BepInEx/`; die echte Installation bleibt unberührt),
+startet einen Test-Server und beide Spiele unter `xvfb-run` als Host und Gast:
+
+```bash
+scripts/game-test.sh "$HOME/Games/Ostfriesland Games"                 # online, Bosseln
+scripts/game-test.sh "$HOME/Games/Ostfriesland Games" online:all pause # alle Disziplinen + Pause
+SHOTS=/tmp/shots scripts/game-test.sh "$HOME/Games/Ostfriesland Games" # mit Screenshots
+```
+
+Szenarien: `online` – verbinden, Raum, Start, Gast ist zuerst fertig und muss dem Host
+zusehen (Zuschauer-Ziel, gespiegelte Szene, gebundene Objekte), Ergebnis mit beiden Punkten,
+zurück in die Lobby. `pause` – der Gast pausiert, nach dem Host läuft die Pausen-Frist ab
+(Server mit `--pause-grace 8`), der Gast bekommt trotzdem das Ergebnis. Disziplin per
+`:0`…`:4` oder `:all`. Jede Prüfung schreibt `PASS`/`FAIL` in eine Ergebnisdatei; das Skript
+fasst sie zusammen und endet mit Fehlercode, wenn etwas fehlschlägt (dann bleibt der
+temporäre Ordner mit allen Logs liegen). In der CI läuft das nicht – dort gibt es das Spiel nicht.
 
 Bekannte Lücken: kein Test mit echtem Controller, kein Spieltest unter echtem Windows.
 

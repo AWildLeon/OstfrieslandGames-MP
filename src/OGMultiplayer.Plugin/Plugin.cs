@@ -4,6 +4,8 @@ using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("OGMultiplayer.GameTests")]
+
 namespace OGMultiplayer.Plugin
 {
     [BepInPlugin(Guid, Name, Version)]

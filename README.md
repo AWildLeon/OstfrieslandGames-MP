@@ -376,6 +376,8 @@ src/Shared/Protocol.cs          gemeinsames Protokoll
 src/OGMultiplayer.Server/       Server (.NET 8, keine Abhängigkeiten)
 src/OGMultiplayer.Plugin/       BepInEx-5-Plugin (netstandard2.1)
 tests/OGMultiplayer.Server.Tests/  Server-Tests (Auth, Rundenablauf, Admin-Befehle)
+tests/OGMultiplayer.GameTests/  Test-Mod für Spieltests im echten Spiel
+scripts/game-test.sh            Spieltests: zwei Spielinstanzen + Test-Server unter Xvfb
 scripts/install.sh              BepInEx + Plugin installieren
 scripts/update-bepinex.sh       BepInEx-Pin auf neueste 5.x-Version heben
 flake.nix                       Pakete, Apps, NixOS-Modul, DevShell
@@ -391,6 +393,13 @@ dotnet build src/OGMultiplayer.Plugin -c Release -p:GameDir="/pfad/zu/Ostfriesla
 
 ```bash
 dotnet test tests/OGMultiplayer.Server.Tests
+```
+
+Spieltests (brauchen das Spiel mit BepInEx, `xvfb-run` und .NET 8; die Installation bleibt
+unberührt, beide Instanzen laufen aus einem temporären Ordner):
+
+```bash
+scripts/game-test.sh "/pfad/zu/Ostfriesland Games" online:all pause
 ```
 
 Getestet mit der Spielversion auf Unity 6000.4.0f1 (Mono) und BepInEx 5.4.23.4 unter Linux.
