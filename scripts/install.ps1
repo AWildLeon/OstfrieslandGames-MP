@@ -17,9 +17,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$BepInExVersion = '5.4.23.4'
+$BepInExVersion = '5.4.23.6'
 $BepInExUrl = "https://github.com/BepInEx/BepInEx/releases/download/v$BepInExVersion/BepInEx_win_x64_$BepInExVersion.zip"
-$BepInExSha256 = 'f881201b79da03e513bf97cdf39607ffa7f9e0d31a519b1aeeca8eb60f8309e7'
+$BepInExSha256 = '6c57a714a892efb4e9e1fef63d608a3391f30ec984031c465404e4ee381a0755'
 
 $RepoDir = Split-Path -Parent $PSScriptRoot
 

@@ -9,9 +9,9 @@
 #   DOTNET        dotnet executable (default: dotnet)
 set -euo pipefail
 
-BEPINEX_VERSION="5.4.23.4"
+BEPINEX_VERSION="5.4.23.6"
 BEPINEX_URL="https://github.com/BepInEx/BepInEx/releases/download/v${BEPINEX_VERSION}/BepInEx_linux_x64_${BEPINEX_VERSION}.zip"
-BEPINEX_SHA256="2722c37c69251e1fe8d25707c8ecf41d9b8c92d8311c6832aa4777c9db9ac0f6"
+BEPINEX_SHA256="f8ac87a97fb1ef85451c04ace1fddb7dd7eb0b079c179b989d6bc462c98bd365"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOTNET="${DOTNET:-dotnet}"
