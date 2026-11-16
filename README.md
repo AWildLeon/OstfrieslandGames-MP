@@ -47,7 +47,7 @@ bzw. `OG.exe` und `OG_Data/`). Online spielen Linux und Windows problemlos mitei
 nix run github:AWildLeon/OstfrieslandGames-MP#install -- "/pfad/zu/Ostfriesland Games"
 ```
 
-Das entpackt BepInEx 5.4.23.4 (gepinnt per Hash) in den Spielordner und baut das
+Das entpackt BepInEx 5.4.23.6 (gepinnt per Hash) in den Spielordner und baut das
 Plugin nach `BepInEx/plugins/OGMultiplayer/`.
 
 Spiel starten (FHS-Umgebung via `steam-run-free`):
